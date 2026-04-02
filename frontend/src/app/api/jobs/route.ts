@@ -9,7 +9,6 @@ import { pushConversionJob } from "@/lib/queue";
 type CreateJobBody = {
   inputFileKey: string;
   colorMode?: "color" | "bw";
-  printLayout?: "standard" | "mirrored";
 };
 
 export async function GET(req: NextRequest) {
@@ -71,7 +70,6 @@ export async function POST(req: NextRequest) {
   );
 
   const colorMode = body.colorMode === "bw" ? "bw" : "color";
-  const printLayout = body.printLayout === "mirrored" ? "mirrored" : "standard";
 
   await pushConversionJob({
     job_id: jobId,
@@ -79,7 +77,6 @@ export async function POST(req: NextRequest) {
     input_file_key: body.inputFileKey,
     output_prefix: `users/${user.id}/outputs`,
     color_mode: colorMode,
-    print_layout: printLayout,
   });
 
   return NextResponse.json({ jobId, status: "queued" }, { status: 201 });

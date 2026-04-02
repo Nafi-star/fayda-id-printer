@@ -13,8 +13,7 @@ export const messages: Record<Locale, Record<string, unknown>> = {
       language: "Language",
     },
     banner: {
-      compact:
-        "Mirror Print: choose Standard or Mirrored PNG — ideal for duplex printers and card stock.",
+      compact: "High-resolution PNG output — optimized for wallet-size ID printing at home or at a shop.",
     },
     dashboard: {
       qualityBadge: "High-quality · print-ready PNG",
@@ -30,9 +29,6 @@ export const messages: Record<Locale, Record<string, unknown>> = {
       noFile: "No file selected",
       color: "Color",
       bw: "Black & white",
-      layoutStandard: "Standard layout",
-      layoutMirrored: "Mirrored (print)",
-      layoutHint: "Mirrored flips horizontally for some duplex printers.",
       convert: "Convert",
       converting: "Converting…",
       trialExhaustedBtn: "Free trial used",
@@ -107,7 +103,7 @@ export const messages: Record<Locale, Record<string, unknown>> = {
     },
     banner: {
       compact:
-        "አዲስ፡ Mirror Print — መደበኛ ወይም የተገላቢጦሽ PNG ያውርዱ። ለድብልቅ ህትመት ጥሩ ነው።",
+        "ከፍተኛ ጥራት PNG — በቤት ወይም በሱቅ ለየካርድ መጠን ህትመት የተዘጋጀ።",
     },
     dashboard: {
       qualityBadge: "ከፍተና ጥራት · ለህትመት ዝግጁ PNG",
@@ -123,9 +119,6 @@ export const messages: Record<Locale, Record<string, unknown>> = {
       noFile: "ምንም ፋይል አልተመረጠም",
       color: "ቀለም",
       bw: "ጥቁር ነጭ",
-      layoutStandard: "መደበኛ",
-      layoutMirrored: "የተገላቢጦሽ (ህትመት)",
-      layoutHint: "ለአንዳን ድብልቅ ማተሚያዎች የተገላቢጦሽ አማራጭ።",
       convert: "ቀይር",
       converting: "በመቀየር ላይ…",
       trialExhaustedBtn: "ነጻ ሙከራ አልቋል",

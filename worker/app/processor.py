@@ -3,8 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
-from PIL import Image, ImageOps
+from PIL import Image
 
+from app.config import settings
 from app.schemas import ConversionJob, ConversionResult
 
 ColorMode = Literal["color", "bw"]
@@ -12,10 +13,13 @@ ColorMode = Literal["color", "bw"]
 # Printable ID-sized canvas (~3.4" × 2.1" at ~300 dpi)
 CARD_W = 1016
 CARD_H = 640
+# Cap PDF raster longest side — enough for sharp downscale to the card, much faster than full 300dpi page.
+PDF_RASTER_MAX_DIM = 1600
 
 
 def _storage_paths() -> tuple[Path, Path]:
-    root = Path(__file__).resolve().parents[2] / "storage"
+    custom = settings.storage_root.strip()
+    root = Path(custom) if custom else Path(__file__).resolve().parents[2] / "storage"
     input_root = root / "input"
     output_root = root / "output"
     return input_root, output_root
@@ -23,11 +27,16 @@ def _storage_paths() -> tuple[Path, Path]:
 
 def _letterbox_to_card(img: Image.Image, color_mode: ColorMode) -> Image.Image:
     if color_mode == "bw":
-        img = img.convert("L").convert("RGB")
+        work = img.convert("L").convert("RGB")
     else:
-        img = img.convert("RGB")
+        work = img.convert("RGB")
+    # Phone screenshots can be huge; pre-scale so thumbnail-to-card stays fast.
+    max_in = max(work.size)
+    if max_in > PDF_RASTER_MAX_DIM:
+        work = work.copy()
+        work.thumbnail((PDF_RASTER_MAX_DIM, PDF_RASTER_MAX_DIM), Image.Resampling.LANCZOS)
     canvas = Image.new("RGB", (CARD_W, CARD_H), (255, 255, 255))
-    img_copy = img.copy()
+    img_copy = work.copy()
     img_copy.thumbnail((CARD_W, CARD_H), Image.Resampling.LANCZOS)
     x = (CARD_W - img_copy.width) // 2
     y = (CARD_H - img_copy.height) // 2
@@ -59,8 +68,14 @@ def process_conversion_job(job: ConversionJob) -> ConversionResult:
             if len(doc) == 0:
                 raise ValueError("PDF has no pages")
             page = doc.load_page(0)
-            zoom = 300 / 72
-            mat = fitz.Matrix(zoom, zoom)
+            rect = page.rect
+            w_pt, h_pt = rect.width, rect.height
+            longest_pt = max(w_pt, h_pt)
+            if longest_pt <= 0:
+                raise ValueError("Invalid PDF page size")
+            # Downscale huge pages to PDF_RASTER_MAX_DIM; never upscale beyond ~300 dpi equivalent.
+            scale_pp = min(PDF_RASTER_MAX_DIM / longest_pt, 300 / 72)
+            mat = fitz.Matrix(scale_pp, scale_pp)
             pix = page.get_pixmap(matrix=mat, alpha=False)
             pil_image = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
         finally:
@@ -70,10 +85,8 @@ def process_conversion_job(job: ConversionJob) -> ConversionResult:
         with Image.open(input_path) as im:
             card = _letterbox_to_card(im, color_mode)
 
-    if job.print_layout == "mirrored":
-        card = ImageOps.mirror(card)
-
-    card.save(str(output_path), "PNG", optimize=True)
+    # compress_level 3 is fast; avoid optimize=True (extra passes) for quicker saves.
+    card.save(str(output_path), "PNG", compress_level=3)
 
     normalized_key = str(Path(output_key)).replace("\\", "/")
     return ConversionResult(

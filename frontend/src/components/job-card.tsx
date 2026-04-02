@@ -94,7 +94,7 @@ export function JobCard({ job, variant = "default" }: { job: JobCardModel; varia
             {name}
           </h3>
           <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-zinc-500">
-            <span>{formatWhen(job.created_at, locale)}</span>
+            <span suppressHydrationWarning>{formatWhen(job.created_at, locale)}</span>
             <span className="text-zinc-600">·</span>
             <span className="font-mono text-[10px] text-zinc-600">#{shortId}</span>
           </p>

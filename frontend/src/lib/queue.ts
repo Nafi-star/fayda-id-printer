@@ -15,7 +15,6 @@ export type QueuePayload = {
   input_file_key: string;
   output_prefix: string;
   color_mode: "color" | "bw";
-  print_layout: "standard" | "mirrored";
 };
 
 export async function pushConversionJob(payload: QueuePayload) {

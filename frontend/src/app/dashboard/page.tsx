@@ -26,7 +26,6 @@ export default function DashboardPage() {
   const [fileName, setFileName] = useState("No file selected");
   const [mode, setMode] = useState<"pdf" | "image">("pdf");
   const [colorMode, setColorMode] = useState<"color" | "bw">("color");
-  const [printLayout, setPrintLayout] = useState<"standard" | "mirrored">("standard");
   const [loading, setLoading] = useState(true);
   const [converting, setConverting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -34,10 +33,12 @@ export default function DashboardPage() {
   const [previewJob, setPreviewJob] = useState<Job | null>(null);
   const [previewBust, setPreviewBust] = useState(0);
   const [usage, setUsage] = useState<UsageInfo | null>(null);
+  /** Avoid SSR/client mismatch on controls that depend on fetch + locale. */
+  const [isClient, setIsClient] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const refresh = useCallback(async () => {
-    setError(null);
+  const refresh = useCallback(async (opts?: { clearError?: boolean }) => {
+    if (opts?.clearError !== false) setError(null);
     const meRes = await fetch("/api/auth/me", { credentials: "include" });
     const meData = (await meRes.json()) as { user: User | null };
     if (!meRes.ok || !meData.user) {
@@ -62,7 +63,18 @@ export default function DashboardPage() {
   }, [router, t]);
 
   useEffect(() => {
-    refresh().finally(() => setLoading(false));
+    setIsClient(true);
+    let cancelled = false;
+    void (async () => {
+      try {
+        await refresh({ clearError: false });
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [refresh]);
 
   useEffect(() => {
@@ -91,7 +103,7 @@ export default function DashboardPage() {
       }
     }
 
-    pollRef.current = setInterval(poll, 1200);
+    pollRef.current = setInterval(poll, 500);
     poll();
 
     return () => {
@@ -142,7 +154,6 @@ export default function DashboardPage() {
         body: JSON.stringify({
           inputFileKey: uploadData.inputFileKey,
           colorMode,
-          printLayout,
         }),
       });
       const jobData = (await jobRes.json()) as { jobId?: string; message?: string };
@@ -266,35 +277,11 @@ export default function DashboardPage() {
             >
               {t("dashboard.bw")}
             </button>
-            <span className="hidden h-4 w-px bg-white/10 sm:inline" aria-hidden />
-            <button
-              type="button"
-              onClick={() => setPrintLayout("standard")}
-              className={`rounded-full border px-4 py-1.5 text-xs font-semibold transition sm:px-5 sm:py-2 sm:text-sm ${
-                printLayout === "standard"
-                  ? "border-cyan-400/50 bg-cyan-950/40 text-cyan-200"
-                  : "border-white/25 text-zinc-300 hover:border-white/40"
-              }`}
-            >
-              {t("dashboard.layoutStandard")}
-            </button>
-            <button
-              type="button"
-              onClick={() => setPrintLayout("mirrored")}
-              className={`rounded-full border px-4 py-1.5 text-xs font-semibold transition sm:px-5 sm:py-2 sm:text-sm ${
-                printLayout === "mirrored"
-                  ? "border-cyan-400/50 bg-cyan-950/40 text-cyan-200"
-                  : "border-white/25 text-zinc-300 hover:border-white/40"
-              }`}
-            >
-              {t("dashboard.layoutMirrored")}
-            </button>
           </div>
-          <p className="mt-2 text-[11px] leading-relaxed text-zinc-500">{t("dashboard.layoutHint")}</p>
 
           <button
             type="button"
-            disabled={converting || loading || Boolean(trialExhausted)}
+            disabled={!isClient || converting || loading || Boolean(trialExhausted)}
             onClick={runConversion}
             className="mt-6 h-12 w-full rounded-full bg-[#3b82f6] text-base font-bold text-white shadow-lg shadow-blue-500/25 transition hover:bg-[#2563eb] disabled:cursor-not-allowed disabled:opacity-50 sm:mt-8 sm:h-14 sm:text-lg"
           >

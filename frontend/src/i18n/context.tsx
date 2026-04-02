@@ -36,8 +36,10 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    setLocaleState(readInitialLocale());
-    setReady(true);
+    queueMicrotask(() => {
+      setLocaleState(readInitialLocale());
+      setReady(true);
+    });
   }, []);
 
   const setLocale = useCallback((next: Locale) => {

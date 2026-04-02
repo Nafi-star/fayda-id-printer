@@ -42,7 +42,7 @@ async def run_consumer(stop_event: asyncio.Event) -> None:
 
             try:
                 await _notify_frontend({"jobId": job.job_id, "status": "processing"})
-                result = process_conversion_job(job)
+                result = await asyncio.to_thread(process_conversion_job, job)
                 await _notify_frontend(
                     {
                         "jobId": job.job_id,

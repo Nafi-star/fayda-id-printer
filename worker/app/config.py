@@ -11,6 +11,9 @@ class Settings(BaseSettings):
     frontend_base_url: str = "http://localhost:3000"
     worker_callback_token: str = "replace-with-shared-token"
 
+    # Absolute path shared with Next.js (input/ and output/ live under here). Empty = repo ../storage
+    storage_root: str = ""
+
     database_url: str = "postgresql://postgres:postgres@localhost:5432/fayda_printer"
 
     s3_endpoint: str = "http://localhost:9000"

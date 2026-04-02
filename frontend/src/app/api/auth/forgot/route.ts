@@ -11,11 +11,11 @@ export async function POST(req: NextRequest) {
 
   const result = await createPasswordReset(email);
 
-  // For v1 dev UX: return token so you can test the reset flow.
-  // In production, do not return token; send it by email.
+  const isDev = process.env.NODE_ENV !== "production";
   return NextResponse.json({
     ok: true,
-    token: result.tokenForDebug,
+    message: "If an account exists for this email, check for reset instructions.",
+    ...(isDev ? { token: result.tokenForDebug } : {}),
   });
 }
 

@@ -2,7 +2,9 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 
-const storageRoot = path.resolve(process.cwd(), "..", "storage");
+const storageRoot = process.env.STORAGE_ROOT?.trim()
+  ? path.resolve(process.env.STORAGE_ROOT.trim())
+  : path.resolve(process.cwd(), "..", "storage");
 const inputRoot = path.join(storageRoot, "input");
 const outputRoot = path.join(storageRoot, "output");
 
