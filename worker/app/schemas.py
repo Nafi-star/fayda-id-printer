@@ -1,4 +1,6 @@
-from pydantic import BaseModel
+from typing import Literal
+
+from pydantic import BaseModel, Field
 
 
 class ConversionJob(BaseModel):
@@ -6,6 +8,8 @@ class ConversionJob(BaseModel):
     user_id: str
     input_file_key: str
     output_prefix: str
+    color_mode: Literal["color", "bw"] = Field(default="color")
+    print_layout: Literal["standard", "mirrored"] = Field(default="standard")
 
 
 class ConversionResult(BaseModel):

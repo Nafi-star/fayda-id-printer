@@ -1,0 +1,17 @@
+import { NextRequest, NextResponse } from "next/server";
+
+import { getUserFromSession } from "@/lib/auth";
+
+export async function GET(req: NextRequest) {
+  const token = req.cookies.get("session")?.value;
+  const user = await getUserFromSession(token);
+  if (!user) {
+    const isDev = process.env.NODE_ENV !== "production";
+    return NextResponse.json(
+      { user: null, tokenSeen: isDev ? token ?? null : undefined },
+      { status: 200 },
+    );
+  }
+  return NextResponse.json({ user });
+}
+
