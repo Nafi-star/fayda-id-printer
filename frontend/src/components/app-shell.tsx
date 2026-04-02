@@ -32,6 +32,11 @@ export function AppShell({ active, children, userLabel = "S7" }: AppShellProps) 
     router.push("/login");
   }
 
+  function go(path: string) {
+    setMenuOpen(false);
+    router.push(path);
+  }
+
   useEffect(() => {
     function onDocPointer(e: MouseEvent) {
       if (!menuRef.current) return;
@@ -39,8 +44,15 @@ export function AppShell({ active, children, userLabel = "S7" }: AppShellProps) 
         setMenuOpen(false);
       }
     }
+    function onEsc(e: KeyboardEvent) {
+      if (e.key === "Escape") setMenuOpen(false);
+    }
     document.addEventListener("mousedown", onDocPointer);
-    return () => document.removeEventListener("mousedown", onDocPointer);
+    document.addEventListener("keydown", onEsc);
+    return () => {
+      document.removeEventListener("mousedown", onDocPointer);
+      document.removeEventListener("keydown", onEsc);
+    };
   }, []);
 
   return (
@@ -103,25 +115,41 @@ export function AppShell({ active, children, userLabel = "S7" }: AppShellProps) 
                 {userLabel.slice(0, 2).toUpperCase()}
               </button>
               {menuOpen ? (
-                <div className="absolute right-0 z-50 mt-2 w-44 overflow-hidden rounded-xl border border-white/10 bg-[#0e1625] p-1 shadow-2xl">
-                  <a href="/dashboard" className="block rounded-lg px-3 py-2 text-sm text-zinc-200 hover:bg-white/10">
-                    Dashboard
-                  </a>
-                  <a href="/history" className="block rounded-lg px-3 py-2 text-sm text-zinc-200 hover:bg-white/10">
-                    {t("nav.history")}
-                  </a>
-                  <a href="/pricing" className="block rounded-lg px-3 py-2 text-sm text-zinc-200 hover:bg-white/10">
-                    {t("nav.pricing")}
-                  </a>
-                  <a
-                    href="/purchase-history"
-                    className="block rounded-lg px-3 py-2 text-sm text-zinc-200 hover:bg-white/10"
-                  >
-                    {t("nav.purchaseHistory")}
-                  </a>
+                <div className="absolute right-0 z-[70] mt-2 w-48 overflow-hidden rounded-xl border border-white/10 bg-[#0e1625] p-1 shadow-2xl ring-1 ring-black/30">
                   <button
                     type="button"
-                    onClick={logout}
+                    onClick={() => go("/dashboard")}
+                    className="block w-full rounded-lg px-3 py-2 text-left text-sm text-zinc-200 hover:bg-white/10"
+                  >
+                    Dashboard
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => go("/history")}
+                    className="block w-full rounded-lg px-3 py-2 text-left text-sm text-zinc-200 hover:bg-white/10"
+                  >
+                    {t("nav.history")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => go("/pricing")}
+                    className="block w-full rounded-lg px-3 py-2 text-left text-sm text-zinc-200 hover:bg-white/10"
+                  >
+                    {t("nav.pricing")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => go("/purchase-history")}
+                    className="block w-full rounded-lg px-3 py-2 text-left text-sm text-zinc-200 hover:bg-white/10"
+                  >
+                    {t("nav.purchaseHistory")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      setMenuOpen(false);
+                      await logout();
+                    }}
                     className="mt-1 block w-full rounded-lg px-3 py-2 text-left text-sm font-semibold text-red-300 hover:bg-red-500/15"
                   >
                     {t("nav.signOut")}
