@@ -27,14 +27,13 @@ export default function DashboardPage() {
   const [mode, setMode] = useState<"pdf" | "image">("pdf");
   const [colorMode, setColorMode] = useState<"color" | "bw">("color");
   const [loading, setLoading] = useState(true);
+  const [isClient, setIsClient] = useState(false);
   const [converting, setConverting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pendingJobId, setPendingJobId] = useState<string | null>(null);
   const [previewJob, setPreviewJob] = useState<Job | null>(null);
   const [previewBust, setPreviewBust] = useState(0);
   const [usage, setUsage] = useState<UsageInfo | null>(null);
-  /** Avoid SSR/client mismatch on controls that depend on fetch + locale. */
-  const [isClient, setIsClient] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const refresh = useCallback(async (opts?: { clearError?: boolean }) => {
@@ -63,7 +62,10 @@ export default function DashboardPage() {
   }, [router, t]);
 
   useEffect(() => {
-    setIsClient(true);
+    queueMicrotask(() => setIsClient(true));
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
@@ -281,6 +283,8 @@ export default function DashboardPage() {
 
           <button
             type="button"
+            // Avoid SSR/client hydration mismatches by keeping the disabled value
+            // stable between the server render and the first client render.
             disabled={!isClient || converting || loading || Boolean(trialExhausted)}
             onClick={runConversion}
             className="mt-6 h-12 w-full rounded-full bg-[#3b82f6] text-base font-bold text-white shadow-lg shadow-blue-500/25 transition hover:bg-[#2563eb] disabled:cursor-not-allowed disabled:opacity-50 sm:mt-8 sm:h-14 sm:text-lg"
