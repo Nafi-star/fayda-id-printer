@@ -1,8 +1,7 @@
-import { unlink } from "node:fs/promises";
 import { NextRequest, NextResponse } from "next/server";
 
 import { db, ensureSchema } from "@/lib/db";
-import { getInputAbsolutePath, getOutputAbsolutePath } from "@/lib/storage";
+import { deleteInputObject, deleteOutputObject } from "@/lib/storage";
 
 /**
  * Removes input/output files for jobs older than 24h (completed or failed).
@@ -30,9 +29,9 @@ export async function POST(req: NextRequest) {
   let purged = 0;
   for (const row of result.rows as { id: string; input_file_key: string; output_file_key: string | null }[]) {
     try {
-      await unlink(getInputAbsolutePath(row.input_file_key)).catch(() => {});
+      await deleteInputObject(row.input_file_key).catch(() => {});
       if (row.output_file_key) {
-        await unlink(getOutputAbsolutePath(row.output_file_key)).catch(() => {});
+        await deleteOutputObject(row.output_file_key).catch(() => {});
       }
     } catch {
       /* ignore */

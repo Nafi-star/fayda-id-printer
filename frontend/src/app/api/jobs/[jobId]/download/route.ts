@@ -1,15 +1,15 @@
-import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { NextRequest, NextResponse } from "next/server";
+import { Buffer } from "node:buffer";
 
 import { getUserFromSession } from "@/lib/auth";
 import { db, ensureSchema } from "@/lib/db";
-import { getOutputAbsolutePath } from "@/lib/storage";
+import { readOutputFromStorage } from "@/lib/storage";
 
 type Params = { params: Promise<{ jobId: string }> };
 
-function mimeForPath(filePath: string) {
-  const ext = path.extname(filePath).toLowerCase();
+function mimeForKey(fileKey: string) {
+  const ext = path.extname(fileKey).toLowerCase();
   if (ext === ".png") return "image/png";
   if (ext === ".jpg" || ext === ".jpeg") return "image/jpeg";
   if (ext === ".webp") return "image/webp";
@@ -43,22 +43,22 @@ export async function GET(req: NextRequest, { params }: Params) {
     return NextResponse.json({ message: "Output is not ready yet." }, { status: 400 });
   }
 
-  const absolutePath = getOutputAbsolutePath(job.output_file_key);
+  let bytes: Buffer;
   try {
-    await stat(absolutePath);
+    bytes = await readOutputFromStorage(job.output_file_key);
   } catch {
     return NextResponse.json({ message: "Output file missing." }, { status: 404 });
   }
 
-  const filename = path.basename(absolutePath);
-  const bytes = await readFile(absolutePath);
-  const contentType = mimeForPath(absolutePath);
+  const filename = path.basename(job.output_file_key);
+  const contentType = mimeForKey(job.output_file_key);
   const inline = req.nextUrl.searchParams.get("inline") === "1";
   const disposition = inline
     ? `inline; filename="${filename}"`
     : `attachment; filename="${filename}"`;
 
-  return new NextResponse(bytes, {
+  const ab = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+  return new NextResponse(ab, {
     headers: {
       "Content-Type": contentType,
       "Content-Disposition": disposition,

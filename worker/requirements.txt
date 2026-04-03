@@ -7,3 +7,4 @@ python-dotenv==1.1.0
 PyMuPDF==1.25.5
 Pillow==11.2.1
 httpx==0.28.1
+boto3
