@@ -33,11 +33,13 @@ PDF_RENDER_DPI_CAP = 180
 # If enabled, removes mostly-white borders before fitting to the card.
 AUTO_CROP_ENABLED = True
 # Threshold for near-white detection used by _auto_crop_margins.
-# Pixels with diff-from-white (0=white) greater than this value are treated as content.
-AUTO_CROP_WHITE_THRESHOLD = 245
+# Higher value -> fewer pixels considered "content" -> tighter bbox -> more risk of cutting.
+# Lower value -> more pixels treated as content -> safer (less aggressive cropping).
+AUTO_CROP_WHITE_THRESHOLD = 235
 # Padding added back around the detected content bbox.
 # Keep small so we don't re-introduce whitespace.
-AUTO_CROP_PADDING_PX = 4
+# Increase slightly to avoid cutting small text / edges.
+AUTO_CROP_PADDING_PX = 10
 
 # Corner-background auto-crop is much slower (Python pixel loops). Disable for speed.
 AUTO_CROP_USE_CORNER_BACKGROUND = False
@@ -233,7 +235,9 @@ def _auto_crop_by_corner_background(work_rgb: Image.Image) -> Image.Image:
 
 def _fit_to_card(img: Image.Image, color_mode: ColorMode) -> Image.Image:
     """
-    Fit the source image to the card by cropping-to-fill (no letterbox whitespace).
+    Fit the source image to the card WITHOUT cropping the important edges.
+    We crop mostly-white margins (safe content bbox) and then letterbox (contain)
+    onto the card canvas.
     """
     work_rgb = img.convert("RGB")
 
@@ -253,24 +257,18 @@ def _fit_to_card(img: Image.Image, color_mode: ColorMode) -> Image.Image:
         # Always do a near-white cleanup pass (fast and conservative).
         work_rgb = _auto_crop_margins(work_rgb)
 
-    # Crop-to-fill: scale so the image covers the entire card, then center-crop.
-    src_w, src_h = work_rgb.size
-    if src_w <= 0 or src_h <= 0:
-        # Fallback: return a blank card rather than crashing.
-        return Image.new("RGB", (CARD_W, CARD_H), (255, 255, 255))
+    # Letterbox: scale to fit inside the card; never crop edges.
+    canvas = Image.new("RGB", (CARD_W, CARD_H), (255, 255, 255))
+    work = work_rgb.copy()
+    work.thumbnail((CARD_W, CARD_H), Image.Resampling.LANCZOS)
 
-    scale = max(CARD_W / src_w, CARD_H / src_h)
-    dst_w = max(1, int(math.ceil(src_w * scale)))
-    dst_h = max(1, int(math.ceil(src_h * scale)))
-    resized = work_rgb.resize((dst_w, dst_h), Image.Resampling.LANCZOS)
-
-    left = (dst_w - CARD_W) // 2
-    top = (dst_h - CARD_H) // 2
-    cropped = resized.crop((left, top, left + CARD_W, top + CARD_H))
+    x = (CARD_W - work.width) // 2
+    y = (CARD_H - work.height) // 2
+    canvas.paste(work, (x, y))
 
     if color_mode == "bw":
-        return cropped.convert("L").convert("RGB")
-    return cropped
+        return canvas.convert("L").convert("RGB")
+    return canvas
 
 
 def process_conversion_job(job: ConversionJob) -> ConversionResult:
