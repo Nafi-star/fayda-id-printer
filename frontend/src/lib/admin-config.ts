@@ -3,10 +3,11 @@ function normalize(email: string) {
 }
 
 /**
- * Used only when neither ADMIN_EMAIL nor ADMIN_EMAILS is set.
- * Buyers should set ADMIN_EMAIL or ADMIN_EMAILS in production (Vercel / .env).
+ * Primary admin addresses — edit here. These always have admin access, even if
+ * ADMIN_EMAIL / ADMIN_EMAILS in the environment point at a different address.
+ * Optional env vars add extra admins (e.g. co-owners), they do not replace this list.
  */
-const DEFAULT_ADMIN_EMAIL = "dani745@gmail.com";
+const ADMIN_EMAILS_FROM_CONFIG = ["admingule12@gmail.com"];
 
 /**
  * Comma, semicolon, or newline separated list in ADMIN_EMAILS,
@@ -19,22 +20,26 @@ function rawAdminListFromEnv(): string {
   return process.env.ADMIN_EMAIL?.trim() || "";
 }
 
-export function normalizedAdminEmails(): string[] {
+function parseEnvAdminEmails(): string[] {
   const raw = rawAdminListFromEnv();
-  if (!raw) return [normalize(DEFAULT_ADMIN_EMAIL)];
-  const parts = raw
+  if (!raw) return [];
+  return raw
     .split(/[,;\n]+/)
     .map((s) => s.trim())
-    .filter(Boolean);
-  if (parts.length === 0) return [normalize(DEFAULT_ADMIN_EMAIL)];
-  const normalized = parts.map(normalize);
-  return [...new Set(normalized)];
+    .filter(Boolean)
+    .map(normalize);
 }
 
-/** First admin (e.g. primary contact). Prefer normalizedAdminEmails() for checks. */
+export function normalizedAdminEmails(): string[] {
+  const fromConfig = ADMIN_EMAILS_FROM_CONFIG.map(normalize).filter(Boolean);
+  const fromEnv = parseEnvAdminEmails();
+  return [...new Set([...fromConfig, ...fromEnv])];
+}
+
+/** First admin (e.g. primary contact): config first, then env extras. */
 export function normalizedAdminEmail(): string {
   const all = normalizedAdminEmails();
-  return all[0] ?? normalize(DEFAULT_ADMIN_EMAIL);
+  return all[0] ?? "";
 }
 
 export function isAdminEmail(email: string): boolean {
