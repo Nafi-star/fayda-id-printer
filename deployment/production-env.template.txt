@@ -1,4 +1,4 @@
-# Copy values into Vercel (frontend) and Fly/Railway (worker).
+# Copy values into Vercel (frontend) and the worker host (Railway / Render / Fly).
 # Generate a random WORKER_CALLBACK_TOKEN (32+ chars) — same on both.
 
 WORKER_CALLBACK_TOKEN=
@@ -31,5 +31,8 @@ ADMIN_EMAIL=you@yourdomain.com
 RESEND_API_KEY=
 EMAIL_FROM=Fayda ID <noreply@yourdomain.com>
 
-# Worker (fly secrets)
+# Worker (Railway / Render variables, or fly secrets)
 FRONTEND_BASE_URL=https://your-app.vercel.app
+
+# Vercel only (optional): public URL of the worker for /api/worker/health
+# WORKER_BASE_URL=https://your-worker.example.com
