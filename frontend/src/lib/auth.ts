@@ -97,11 +97,16 @@ export async function loginUser(email: string, password: string) {
 
   const st = user.account_status as AccountStatus;
   if (st === "pending") {
-    return {
-      ok: false as const,
-      code: "PENDING_APPROVAL" as const,
-      message: "Your account is waiting for administrator approval. You will be able to sign in once it is approved.",
-    };
+    if (isAdminEmail(normalized)) {
+      await db.query(`UPDATE users SET account_status = 'active' WHERE id = $1`, [user.id]);
+    } else {
+      return {
+        ok: false as const,
+        code: "PENDING_APPROVAL" as const,
+        message:
+          "Your account is waiting for administrator approval. You will be able to sign in once it is approved.",
+      };
+    }
   }
   if (st === "disabled") {
     return {
