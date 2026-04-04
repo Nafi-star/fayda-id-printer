@@ -1,0 +1,22 @@
+# Deploy from the worker/ folder:  fly auth login && fly launch
+# Set secrets: fly secrets set REDIS_URL=... FRONTEND_BASE_URL=... (see DEPLOY.md)
+
+app = "fayda-printer-worker"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[http_service]
+  internal_port = 8001
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+[[http_service.checks]]
+  interval = "45s"
+  timeout = "5s"
+  grace_period = "10s"
+  method = "GET"
+  path = "/health"

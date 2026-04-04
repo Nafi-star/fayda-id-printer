@@ -19,6 +19,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ message: result.message }, { status: 409 });
   }
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({
+    ok: true,
+    pendingApproval: result.accountStatus === "pending",
+  });
 }
 

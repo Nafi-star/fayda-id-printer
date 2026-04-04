@@ -3,6 +3,7 @@ import json
 import logging
 
 import httpx
+from httpx import Timeout
 from redis.asyncio import Redis
 
 from app.config import settings
@@ -32,9 +33,12 @@ async def _notify_frontend(payload: dict, *, attempts: int = 5) -> bool:
     headers = {"x-worker-token": settings.worker_callback_token}
     last_err: BaseException | None = None
 
+    # Short timeouts: a hung callback should not block the consumer for half a minute per attempt.
+    _http_timeout = Timeout(12.0, connect=4.0)
+
     for i in range(attempts):
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=_http_timeout) as client:
                 response = await client.post(url, json=payload, headers=headers)
                 response.raise_for_status()
             return True

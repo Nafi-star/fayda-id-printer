@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import io
 import logging
+import math
 import time
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 import boto3
 from botocore.config import Config as BotoConfig
@@ -22,12 +23,14 @@ ColorMode = Literal["color", "bw"]
 # Printable ID-sized canvas (~3.4" × 2.1" at ~300 dpi)
 CARD_W = 1016
 CARD_H = 640
-# Cap PDF raster longest side — enough for sharp downscale to the card, much faster than full 300dpi page.
-PDF_RASTER_MAX_DIM = 1600
+# Cap PDF raster longest side (~output is 1016 px); lower = faster render with still-sharp prints.
+PDF_RASTER_MAX_DIM = 1120
 # Quality multiplier for rendering. Keep near 1x so we don't rasterize huge pages.
 PDF_RENDER_QUALITY_SCALE = 0.95
-# Hard cap on equivalent DPI to keep rendering fast.
-PDF_RENDER_DPI_CAP = 150
+# Hard cap on equivalent DPI to keep rendering fast (final card image is ~1016 px long side).
+PDF_RENDER_DPI_CAP = 96
+# Run white-margin crop on a downscaled copy above this longest side (much faster than full-res diff).
+AUTO_CROP_DETECT_MAX_DIM = 640
 
 # If enabled, removes mostly-white borders before fitting to the card.
 AUTO_CROP_ENABLED = True
@@ -78,6 +81,17 @@ def _local_output_path(output_key: str) -> Path:
     return _resolve_storage_root() / "output" / Path(output_key)
 
 
+def _write_local_png(output_key: str, png_bytes: bytes) -> None:
+    out_path = _local_output_path(output_key)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_bytes(png_bytes)
+
+
+def _s3_enabled() -> bool:
+    ep = settings.s3_endpoint
+    return bool(ep and str(ep).strip())
+
+
 def _get_s3_client():
     global _s3_client
     if _s3_client is not None:
@@ -114,26 +128,97 @@ def _ensure_s3_buckets() -> None:
     _s3_buckets_initialized = True
 
 
+def _crop_pure_white_margins(
+    work_rgb: Image.Image,
+    *,
+    white_floor: int = 248,
+) -> Image.Image:
+    """
+    Remove only letterbox margins that are effectively pure white (typical PDF print margins).
+    Fayda cards use light green/yellow/pink patterns — those are NOT white, so they stay intact.
+    """
+    w, h = work_rgb.size
+    if w < 3 or h < 3:
+        return work_rgb
+
+    px = work_rgb.load()
+    if px is None:
+        return work_rgb
+
+    def row_mostly_white(y: int) -> bool:
+        # Sample for speed on very wide rasters; full scan if narrow
+        step = max(1, w // 2000) if w > 2000 else 1
+        for x in range(0, w, step):
+            r, g, b = cast(tuple[int, int, int], px[x, y])
+            if r < white_floor or g < white_floor or b < white_floor:
+                return False
+        return True
+
+    def col_mostly_white(x: int) -> bool:
+        step = max(1, h // 2000) if h > 2000 else 1
+        for y in range(0, h, step):
+            r, g, b = cast(tuple[int, int, int], px[x, y])
+            if r < white_floor or g < white_floor or b < white_floor:
+                return False
+        return True
+
+    top = 0
+    while top < h and row_mostly_white(top):
+        top += 1
+    bottom = h - 1
+    while bottom > top and row_mostly_white(bottom):
+        bottom -= 1
+    left = 0
+    while left < w and col_mostly_white(left):
+        left += 1
+    right = w - 1
+    while right > left and col_mostly_white(right):
+        right -= 1
+
+    pad = 1
+    left = max(0, left - pad)
+    top = max(0, top - pad)
+    right = min(w - 1, right + pad)
+    bottom = min(h - 1, bottom + pad)
+
+    if right <= left or bottom <= top:
+        return work_rgb
+    return work_rgb.crop((left, top, right + 1, bottom + 1))
+
+
 def _auto_crop_margins(work_rgb: Image.Image) -> Image.Image:
     """
     Crop near-white margins to reduce extra whitespace around the ID.
     This is intentionally conservative (near-white only) to avoid cutting dark content.
     """
-    # diff is 0 for identical pixels; near-white areas become tiny diffs.
-    white_bg = Image.new("RGB", work_rgb.size, (255, 255, 255))
-    diff = ImageChops.difference(work_rgb, white_bg).convert("L")
+    w, h = work_rgb.size
+    max_side = max(w, h)
+    if max_side < 2:
+        return work_rgb
 
-    # Build a binary mask of "not-white enough" pixels.
+    scale = 1.0
+    detect = work_rgb
+    if max_side > AUTO_CROP_DETECT_MAX_DIM:
+        scale = AUTO_CROP_DETECT_MAX_DIM / float(max_side)
+        dw = max(1, int(round(w * scale)))
+        dh = max(1, int(round(h * scale)))
+        detect = work_rgb.resize((dw, dh), Image.Resampling.BILINEAR)
+
+    white_bg = Image.new("RGB", detect.size, (255, 255, 255))
+    diff = ImageChops.difference(detect, white_bg).convert("L")
     mask = diff.point(lambda p: 255 if p > AUTO_CROP_WHITE_THRESHOLD else 0)
     bbox = mask.getbbox()
     if not bbox:
         return work_rgb
 
     left, top, right, bottom = bbox
-    left = max(0, left - AUTO_CROP_PADDING_PX)
-    top = max(0, top - AUTO_CROP_PADDING_PX)
-    right = min(work_rgb.width, right + AUTO_CROP_PADDING_PX)
-    bottom = min(work_rgb.height, bottom + AUTO_CROP_PADDING_PX)
+    inv = 1.0 / scale
+    left = max(0, int(math.floor(left * inv)) - AUTO_CROP_PADDING_PX)
+    top = max(0, int(math.floor(top * inv)) - AUTO_CROP_PADDING_PX)
+    right = min(w, int(math.ceil(right * inv)) + AUTO_CROP_PADDING_PX)
+    bottom = min(h, int(math.ceil(bottom * inv)) + AUTO_CROP_PADDING_PX)
+    if right <= left or bottom <= top:
+        return work_rgb
     return work_rgb.crop((left, top, right, bottom))
 
 
@@ -186,7 +271,7 @@ def _auto_crop_by_corner_background(work_rgb: Image.Image) -> Image.Image:
 
     det_w = max(1, int(round(w * scale)))
     det_h = max(1, int(round(h * scale)))
-    det_img = work_rgb.resize((det_w, det_h), Image.Resampling.LANCZOS)
+    det_img = work_rgb.resize((det_w, det_h), Image.Resampling.BILINEAR)
     det_pixels = det_img.load()
     det_mask = Image.new("L", (det_w, det_h), 0)
     det_mpix = det_mask.load()
@@ -232,36 +317,45 @@ def _auto_crop_by_corner_background(work_rgb: Image.Image) -> Image.Image:
     return cropped
 
 
-def _fit_to_card(img: Image.Image, color_mode: ColorMode) -> Image.Image:
+MarginStrategy = Literal["auto", "pure_white", "none"]
+
+
+def _fit_to_card(
+    img: Image.Image,
+    color_mode: ColorMode,
+    *,
+    skip_corner_fallback: bool = False,
+    margin_strategy: MarginStrategy = "auto",
+) -> Image.Image:
     """
-    Full ID visible, no outer page margins, no letterbox canvas:
-    - Auto-crop trims scanner/PDF whitespace around the card.
-    - Uniform resize so the longest side matches OUTPUT_MAX_PX (~print-ready);
-      aspect ratio is preserved, so nothing is cropped and no white bars are added.
+    Full ID visible, no letterbox on output:
+    - PDFs: default margin_strategy "pure_white" strips only true white PDF margins (see caller).
+    - Screenshots: "auto" uses difference-based crop + optional corner fallback.
+    - Uniform resize so the longest side matches ~print-ready size; aspect preserved (no content cut).
     """
     work_rgb = img.convert("RGB")
 
     # Phone screenshots can be huge; pre-scale so cropping stays fast.
     max_in = max(work_rgb.size)
     if max_in > PDF_RASTER_MAX_DIM:
-        work_rgb.thumbnail((PDF_RASTER_MAX_DIM, PDF_RASTER_MAX_DIM), Image.Resampling.LANCZOS)
+        work_rgb.thumbnail((PDF_RASTER_MAX_DIM, PDF_RASTER_MAX_DIM), Image.Resampling.BILINEAR)
 
-    if AUTO_CROP_ENABLED:
-        orig_w, orig_h = work_rgb.size
-        # Fast first pass: near-white crop.
-        fast_crop = _auto_crop_margins(work_rgb)
-        work_rgb = fast_crop
+    if AUTO_CROP_ENABLED and margin_strategy != "none":
+        if margin_strategy == "pure_white":
+            work_rgb = _crop_pure_white_margins(work_rgb)
+        else:
+            orig_w, orig_h = work_rgb.size
+            fast_crop = _auto_crop_margins(work_rgb)
+            work_rgb = fast_crop
 
-        # If fast crop barely changed area, we likely still have big page margins.
-        # Then use corner-background crop as a stronger fallback.
-        if AUTO_CROP_USE_CORNER_BACKGROUND:
-            orig_area = max(1, orig_w * orig_h)
-            fast_area = work_rgb.size[0] * work_rgb.size[1]
-            fast_ratio = fast_area / orig_area
-            if fast_ratio > 0.78:
-                stronger = _auto_crop_by_corner_background(work_rgb)
-                if stronger.size != work_rgb.size:
-                    work_rgb = stronger
+            if AUTO_CROP_USE_CORNER_BACKGROUND and not skip_corner_fallback:
+                orig_area = max(1, orig_w * orig_h)
+                fast_area = work_rgb.size[0] * work_rgb.size[1]
+                fast_ratio = fast_area / orig_area
+                if fast_ratio > 0.78:
+                    stronger = _auto_crop_by_corner_background(work_rgb)
+                    if stronger.size != work_rgb.size:
+                        work_rgb = stronger
 
     src_w, src_h = work_rgb.size
     if src_w <= 0 or src_h <= 0:
@@ -273,7 +367,7 @@ def _fit_to_card(img: Image.Image, color_mode: ColorMode) -> Image.Image:
     scale = output_max_px / float(longest)
     dst_w = max(1, int(round(src_w * scale)))
     dst_h = max(1, int(round(src_h * scale)))
-    out = work_rgb.resize((dst_w, dst_h), Image.Resampling.LANCZOS)
+    out = work_rgb.resize((dst_w, dst_h), Image.Resampling.BICUBIC)
 
     if color_mode == "bw":
         return out.convert("L").convert("RGB")
@@ -289,32 +383,47 @@ def process_conversion_job(job: ConversionJob) -> ConversionResult:
     output_key = f"{job.output_prefix}/{job.job_id}.png"
     color_mode: ColorMode = job.color_mode if job.color_mode in ("color", "bw") else "color"
 
-    _ensure_s3_buckets()
-    s3 = _get_s3_client()
+    use_s3 = _s3_enabled()
+    s3 = _get_s3_client() if use_s3 else None
+    if use_s3:
+        _ensure_s3_buckets()
 
-    # Download input bytes from S3.
     t_download0 = time.perf_counter()
-    try:
-        resp = s3.get_object(Bucket=settings.s3_bucket_input, Key=input_key)
-        input_bytes = resp["Body"].read()
-    except Exception as exc:
-        # Local dev can run with Next.js uploading to filesystem while the worker
-        # still expects S3. Fall back to the shared local storage directory.
+    input_bytes: bytes
+    if use_s3 and s3 is not None:
+        try:
+            resp = s3.get_object(Bucket=settings.s3_bucket_input, Key=input_key)
+            input_bytes = resp["Body"].read()
+        except Exception as exc:
+            local_path = _local_input_path(input_key)
+            if local_path.exists():
+                logger.warning(
+                    "S3 input missing; using local file. key=%s local=%s",
+                    input_key,
+                    str(local_path),
+                )
+                input_bytes = local_path.read_bytes()
+            else:
+                raise FileNotFoundError(f"Input file not found in S3: {input_key}") from exc
+    else:
         local_path = _local_input_path(input_key)
-        if local_path.exists():
-            logger.warning(
-                "S3 input missing; using local file. key=%s local=%s",
-                input_key,
-                str(local_path),
+        if not local_path.exists():
+            raise FileNotFoundError(
+                f"Input file not found locally: {input_key} (expected at {local_path}). "
+                "Use the same STORAGE_ROOT as Next.js, or configure S3 on both apps.",
             )
-            input_bytes = local_path.read_bytes()
-        else:
-            raise FileNotFoundError(f"Input file not found in S3: {input_key}") from exc
+        input_bytes = local_path.read_bytes()
     t_download1 = time.perf_counter()
 
     suffix = Path(input_key).suffix.lower()
     if suffix == ".pdf":
         import fitz
+
+        t_pdf0 = time.perf_counter()
+        # Optional speed tweak — not present in all PyMuPDF builds (would raise AttributeError).
+        tools = getattr(fitz, "TOOLS", None)
+        if tools is not None and hasattr(tools, "set_aa"):
+            tools.set_aa(0)
 
         doc = fitz.open(stream=input_bytes, filetype="pdf")
         try:
@@ -331,16 +440,30 @@ def process_conversion_job(job: ConversionJob) -> ConversionResult:
             scale_fit_w = (CARD_W * PDF_RENDER_QUALITY_SCALE) / w_pt
             scale_fit_h = (CARD_H * PDF_RENDER_QUALITY_SCALE) / h_pt
             scale_pp = min(scale_fit_w, scale_fit_h, PDF_RENDER_DPI_CAP / 72)
+            # Cap raster size: large PDF pages need fewer pixels before downscale to card size.
+            max_scale_for_dim = PDF_RASTER_MAX_DIM / longest_pt
+            scale_pp = min(scale_pp, max_scale_for_dim)
             mat = fitz.Matrix(scale_pp, scale_pp)
-            pix = page.get_pixmap(matrix=mat, alpha=False)
+            try:
+                pix = page.get_pixmap(matrix=mat, alpha=False, annots=False)
+            except Exception:
+                pix = page.get_pixmap(matrix=mat, alpha=False)
             pil_image = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
         finally:
             doc.close()
 
-        card = _fit_to_card(pil_image, color_mode)
+        card = _fit_to_card(
+            pil_image,
+            color_mode,
+            skip_corner_fallback=True,
+            margin_strategy="pure_white",
+        )
+        t_fit1 = time.perf_counter()
     else:
+        t_pdf0 = time.perf_counter()
         with Image.open(io.BytesIO(input_bytes)) as im:
             card = _fit_to_card(im, color_mode)
+        t_fit1 = time.perf_counter()
 
     # compress_level 3 is fast; avoid optimize=True (extra passes) for quicker saves.
     t_encode0 = time.perf_counter()
@@ -352,25 +475,32 @@ def process_conversion_job(job: ConversionJob) -> ConversionResult:
 
     png_bytes = out_buf.getvalue()
 
-    # Upload output to S3 (primary storage for Vercel + remote worker deployment).
     t_upload0 = time.perf_counter()
-    try:
-        s3.put_object(
-            Bucket=settings.s3_bucket_output,
-            Key=output_key,
-            Body=png_bytes,
-            ContentType="image/png",
-        )
-    except Exception:
-        logger.exception("S3 upload failed. key=%s", output_key)
-        raise
+    uploaded_s3 = False
+    if use_s3 and s3 is not None:
+        try:
+            s3.put_object(
+                Bucket=settings.s3_bucket_output,
+                Key=output_key,
+                Body=png_bytes,
+                ContentType="image/png",
+            )
+            uploaded_s3 = True
+        except Exception:
+            logger.exception("S3 output upload failed; using local storage. key=%s", output_key)
+    if not uploaded_s3:
+        _write_local_png(output_key, png_bytes)
     t_upload1 = time.perf_counter()
 
-    # Note: render time is roughly included between download and encode.
+    extra = ""
+    if suffix == ".pdf":
+        extra = f" pdfRaster+fit={t_fit1 - t_pdf0:.2f}s"
+
     logger.info(
-        "job=%s download=%.2fs encode=%.2fs upload=%.2fs total=%.2fs inputBytes=%d",
+        "job=%s download=%.2fs%s encode=%.2fs upload=%.2fs total=%.2fs inputBytes=%d",
         job.job_id,
         t_download1 - t_download0,
+        extra,
         t_encode1 - t_encode0,
         t_upload1 - t_upload0,
         time.perf_counter() - start_t,

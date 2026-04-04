@@ -1,0 +1,35 @@
+# Copy values into Vercel (frontend) and Fly/Railway (worker).
+# Generate a random WORKER_CALLBACK_TOKEN (32+ chars) — same on both.
+
+WORKER_CALLBACK_TOKEN=
+DATABASE_URL=postgresql://user:pass@host/neondb?sslmode=require
+REDIS_URL=rediss://default:xxx@xxx.upstash.io:6379
+
+# --- Object storage: use ONE block (R2 OR Supabase) on both Vercel and worker ---
+
+# Cloudflare R2
+S3_ENDPOINT=https://YOUR_ACCOUNT_ID.r2.cloudflarestorage.com
+S3_REGION=auto
+S3_ACCESS_KEY=
+S3_SECRET_KEY=
+S3_BUCKET_INPUT=fayda-input
+S3_BUCKET_OUTPUT=fayda-output
+S3_FORCE_PATH_STYLE=false
+
+# Supabase Storage (S3 API) — uncomment and fill; comment out R2 block above if you use this
+# S3_ENDPOINT=https://YOUR_PROJECT_REF.storage.supabase.co/storage/v1/s3
+# S3_REGION=us-east-1
+# S3_ACCESS_KEY=
+# S3_SECRET_KEY=
+# S3_BUCKET_INPUT=fayda-input
+# S3_BUCKET_OUTPUT=fayda-output
+# S3_FORCE_PATH_STYLE=true
+
+# Vercel
+APP_URL=https://your-app.vercel.app
+ADMIN_EMAIL=you@yourdomain.com
+RESEND_API_KEY=
+EMAIL_FROM=Fayda ID <noreply@yourdomain.com>
+
+# Worker (fly secrets)
+FRONTEND_BASE_URL=https://your-app.vercel.app

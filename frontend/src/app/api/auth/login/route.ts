@@ -27,7 +27,10 @@ export async function POST(req: NextRequest) {
 
   const result = await loginUser(email, password);
   if (!result.ok) {
-    return NextResponse.json({ message: result.message }, { status: 401 });
+    const code = "code" in result ? result.code : undefined;
+    const status =
+      code === "PENDING_APPROVAL" || code === "ACCOUNT_DISABLED" ? 403 : 401;
+    return NextResponse.json({ message: result.message, code }, { status });
   }
   clearLoginRateLimit(limiterKey);
 

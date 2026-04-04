@@ -46,12 +46,12 @@ export default function RegisterPage() {
         credentials: "include",
         body: JSON.stringify({ email, password }),
       });
-      const data = (await res.json()) as { message?: string };
+      const data = (await res.json()) as { message?: string; pendingApproval?: boolean };
       if (!res.ok) {
         setError(data.message ?? "Register failed.");
         return;
       }
-      router.push("/login?verified=1");
+      router.push(data.pendingApproval ? "/login?pending=1" : "/login?verified=1");
     } catch {
       setError("Network error. Try again.");
     } finally {

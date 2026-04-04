@@ -9,7 +9,7 @@ import { LanguageSwitch } from "@/components/language-switch";
 import { useI18n } from "@/i18n/context";
 
 type AppShellProps = {
-  active: "convert" | "history" | "pricing" | "purchase-history";
+  active: "convert" | "history" | "pricing" | "purchase-history" | "admin";
   children: React.ReactNode;
   userLabel?: string;
 };
@@ -18,6 +18,7 @@ export function AppShell({ active, children, userLabel = "S7" }: AppShellProps) 
   const router = useRouter();
   const { t } = useI18n();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
   const mainNav: Array<{ id: AppShellProps["active"]; label: string; href: string; brand?: boolean }> = [
@@ -25,7 +26,15 @@ export function AppShell({ active, children, userLabel = "S7" }: AppShellProps) 
     { id: "history", label: t("nav.history"), href: "/history" },
     { id: "pricing", label: t("nav.pricing"), href: "/pricing" },
     { id: "purchase-history", label: t("nav.purchaseHistory"), href: "/purchase-history" },
+    ...(isAdmin ? [{ id: "admin" as const, label: t("nav.admin"), href: "/admin" }] : []),
   ];
+
+  useEffect(() => {
+    void fetch("/api/auth/me", { credentials: "include" })
+      .then((r) => r.json())
+      .then((d: { isAdmin?: boolean }) => setIsAdmin(Boolean(d.isAdmin)))
+      .catch(() => setIsAdmin(false));
+  }, []);
 
   async function logout() {
     await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
@@ -144,6 +153,15 @@ export function AppShell({ active, children, userLabel = "S7" }: AppShellProps) 
                   >
                     {t("nav.purchaseHistory")}
                   </button>
+                  {isAdmin ? (
+                    <button
+                      type="button"
+                      onClick={() => go("/admin")}
+                      className="block w-full rounded-lg px-3 py-2 text-left text-sm text-amber-200 hover:bg-white/10"
+                    >
+                      {t("nav.admin")}
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     onClick={async () => {

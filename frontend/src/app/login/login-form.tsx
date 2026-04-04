@@ -67,6 +67,7 @@ export function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const verified = searchParams.get("verified") === "1";
+  const pending = searchParams.get("pending") === "1";
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -92,7 +93,12 @@ export function LoginForm() {
         return;
       }
 
-      router.push("/dashboard");
+      const next = searchParams.get("next");
+      const safeNext =
+        next && next.startsWith("/") && !next.startsWith("//") && !next.includes(":")
+          ? next
+          : "/dashboard";
+      router.push(safeNext);
     } catch {
       setError("Network error. Try again.");
     } finally {
@@ -117,7 +123,12 @@ export function LoginForm() {
           </p>
         </div>
 
-        {verified ? (
+        {pending ? (
+          <div className="mb-5 rounded-md bg-amber-50 px-3 py-3 text-center text-sm font-medium text-amber-950">
+            Account created. An administrator must approve your account before you can sign in. You will receive access once
+            approved.
+          </div>
+        ) : verified ? (
           <div className="mb-5 rounded-md bg-[#d1fae5] px-3 py-3 text-center text-sm font-medium text-[#065f46]">
             Email Verified Successfully, Login To Continue
           </div>

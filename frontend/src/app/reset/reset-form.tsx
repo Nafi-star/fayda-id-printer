@@ -74,9 +74,9 @@ export function ResetForm() {
         </form>
 
         {token ? (
-          <p className="mt-4 text-xs text-zinc-500">Token received. In production, this token comes from your email link.</p>
+          <p className="mt-4 text-xs text-zinc-500">Choose a new password, then sign in with it.</p>
         ) : (
-          <p className="mt-4 text-xs text-zinc-500">Missing token. Try the reset link again.</p>
+          <p className="mt-4 text-xs text-zinc-500">Invalid or missing link. Request a new reset from the forgot password page.</p>
         )}
       </div>
     </AuthPageFrame>

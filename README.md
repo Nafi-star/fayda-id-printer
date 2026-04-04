@@ -1,5 +1,7 @@
 # Fayda ID Printer (Option 2 Architecture)
 
+**Production deployment:** see **[DEPLOY.md](./DEPLOY.md)** (Vercel + Neon + Upstash + **R2 or Supabase Storage** + Fly worker).
+
 This project uses:
 - `frontend/`: Next.js + TypeScript web app
 - `worker/`: Python FastAPI + background processor for PDF jobs

@@ -20,16 +20,25 @@ export default function ForgotPage() {
         credentials: "include",
         body: JSON.stringify({ email }),
       });
-      const data = (await res.json()) as { message?: string; ok?: boolean; token?: string };
+      const data = (await res.json()) as {
+        message?: string;
+        ok?: boolean;
+        devResetLink?: string;
+        emailDelivered?: boolean;
+        emailDebug?: string;
+      };
       if (!res.ok) {
         setError(data.message ?? "Request failed.");
         return;
       }
-      if (data.token) {
-        setMessage(`Dev token (use for reset): ${data.token}`);
-      } else {
-        setMessage("If this email exists, reset instructions were sent.");
+      let msg = data.message ?? "If this email is registered, follow the link we sent.";
+      if (data.emailDelivered === false && data.emailDebug) {
+        msg += `\n\n(Dev: email not sent — ${data.emailDebug})`;
       }
+      if (data.devResetLink) {
+        msg += `\n\nDevelopment reset link (do not share):\n${data.devResetLink}`;
+      }
+      setMessage(msg);
     } catch {
       setError("Network error. Try again.");
     } finally {

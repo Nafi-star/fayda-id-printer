@@ -11,6 +11,7 @@ worker/.venv/
 # Env
 .env
 worker/.env
+frontend/.env.local
 
 # IDE
 .vscode/

@@ -9,12 +9,21 @@ type JobUpdateBody = {
   errorMessage?: string;
 };
 
+/** Matches worker default when .env is not set — see worker/app/config.py */
+const DEV_WORKER_TOKEN_FALLBACK = "dev-shared-token-change-me";
+
+function expectedWorkerTokens(): string[] {
+  const fromEnv = process.env.WORKER_CALLBACK_TOKEN?.trim();
+  if (fromEnv) return [fromEnv];
+  if (process.env.NODE_ENV !== "production") return [DEV_WORKER_TOKEN_FALLBACK];
+  return [];
+}
+
 function isAuthorized(req: NextRequest) {
-  const token = process.env.WORKER_CALLBACK_TOKEN;
-  if (!token) {
-    return false;
-  }
-  return req.headers.get("x-worker-token") === token;
+  const expected = expectedWorkerTokens();
+  if (expected.length === 0) return false;
+  const got = req.headers.get("x-worker-token");
+  return got != null && expected.includes(got);
 }
 
 export async function POST(req: NextRequest) {
