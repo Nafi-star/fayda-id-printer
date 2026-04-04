@@ -1,21 +1,39 @@
 # First-time deployment guide (clear & detailed)
 
-This document is for you if you have **never deployed** a full web app before. Read the **“Big picture”** section first, then follow the steps below in order.
+Read **“Big picture”** once. Then use **either** the path below for **“Vercel already deployed”** (most people finishing production) **or** the **full checklist** if you are starting from zero.
 
 ---
 
-## What to do next (checklist)
+## Frontend already on Vercel — what to do next (your path)
 
-Do these **in order**. Skip a step only if you already finished it.
+Assume **Next.js is live** on Vercel (**Root Directory** should be **`frontend`**). The site can load and still be **incomplete** until the backing services and worker match this guide.
+
+Do these **in order**:
+
+| # | What you do |
+|---|-------------|
+| **1** | **Cloud services (Part A):** If you have not already, create **Neon**, **Upstash Redis**, **R2 or Supabase Storage**, and **Resend** (or SMTP). You need working **`DATABASE_URL`**, **`REDIS_URL`**, all **`S3_*`**, and email vars. |
+| **2** | **Sync Vercel env (Part B3):** In **Vercel → your project → Settings → Environment Variables**, confirm **every** variable in **B3** is set for **Production** (and Preview if you use it). Pay special attention to **`APP_URL`** = your real site URL (https, **no** trailing slash) — then **Redeploy** after changes. |
+| **3** | **One shared secret:** **`WORKER_CALLBACK_TOKEN`** must be the **same** on Vercel and on the worker. If the worker is not deployed yet, generate a long random string now, set it on Vercel, redeploy, then use the same value in Part C. |
+| **4** | **Deploy the worker (Part C):** On **Railway**, **Render**, or **Fly**, deploy from the **`worker/`** folder (Dockerfile). Set **`FRONTEND_BASE_URL`** to your **exact** Vercel production URL. Copy **`REDIS_URL`**, **`S3_*`**, and **`WORKER_CALLBACK_TOKEN`** from Vercel. |
+| **5** | **Optional on Vercel:** After the worker has a URL, add **`WORKER_BASE_URL`** = worker’s `https://…` (helps **`/api/worker/health`**; conversions can work without it). **Redeploy** Vercel. |
+| **6** | **Git in sync:** Push code changes to the **same GitHub repo** Vercel is connected to so production stays up to date (**Part B1**). |
+| **7** | **Test (Part D):** Register, **Convert** a PDF, **Forgot password**. If **Convert** hangs, the worker or Redis/S3/token/URL mismatch is almost always the cause — see **“If something fails”** at the end. |
+
+---
+
+## Full checklist (starting from zero)
+
+Use this if you have **not** put the site on Vercel yet.
 
 | Step | Section | What you do |
 |------|---------|-------------|
-| 1 | **Part A** | Create **Neon** (database), **Upstash** (Redis), **R2 or Supabase** (file storage), **Resend** (email). Copy connection strings and keys into a private note — you will paste them into Vercel and the worker. |
-| 2 | **Part B** | Push the repo to **GitHub**, import the project on **Vercel** with **Root Directory = `frontend`**, add **all** environment variables from **B3**, deploy, then fix **`APP_URL`** to your real `.vercel.app` URL and **redeploy**. |
-| 3 | Invent **`WORKER_CALLBACK_TOKEN`** once (long random string). It must be **identical** on Vercel and on the worker. |
-| 4 | **Part C** | Deploy the **Python worker** using **one** host: **Railway**, **Render**, or **Fly.io** (all use `worker/Dockerfile`). Set the **same** Redis, S3, callback token, and **`FRONTEND_BASE_URL`** = your Vercel site URL. |
-| 5 | **Optional** | On Vercel, set **`WORKER_BASE_URL`** to the worker’s public `https://…` URL so **`/api/worker/health`** can reach it (optional; conversions work without it if Redis + worker are correct). |
-| 6 | **Part D** | Open your live site, register users, test **Convert** and **Forgot password**. |
+| 1 | **Part A** | Create **Neon**, **Upstash**, **R2 or Supabase**, **Resend**. Copy values for Vercel + worker. |
+| 2 | **Part B** | GitHub → Vercel import, **Root Directory = `frontend`**, **B3** env vars, deploy, fix **`APP_URL`**, redeploy. |
+| 3 | **`WORKER_CALLBACK_TOKEN`** | Same value on Vercel and worker (see Part C). |
+| 4 | **Part C** | Deploy worker (**Railway** / **Render** / **Fly**). |
+| 5 | **Optional** | **`WORKER_BASE_URL`** on Vercel. |
+| 6 | **Part D** | End-to-end tests. |
 
 **If Convert spins forever:** the worker is not running, cannot reach Redis, or **`WORKER_CALLBACK_TOKEN`** / **`FRONTEND_BASE_URL`** do not match Vercel. Use your host’s **logs** (see Part C) and the table at the end of this file.
 
@@ -52,9 +70,9 @@ On **Vercel**, you only host the **Next.js** part. Vercel does **not** run the P
 
 ## Before you start — what you need
 
-1. **This project** pushed to **GitHub** (GitLab/Bitbucket also work with Vercel).  
-2. Accounts on: **Vercel**, **Neon**, **Upstash**, **either** Cloudflare (R2) **or** Supabase (Storage only), **Resend**, and **one** worker host from Part C (**Railway**, **Render**, or **Fly.io**).  
-3. **About 30–45 minutes** the first time.  
+1. **This project** on **GitHub** (or the same Git host Vercel uses) — **required** so Vercel can build; keep pushing **`main`** (or your production branch) after changes.  
+2. Accounts: **Vercel** (already done if the frontend is live), **Neon**, **Upstash**, **either** Cloudflare (R2) **or** Supabase (Storage), **Resend** (or SMTP), and **one** worker host from Part C (**Railway**, **Render**, or **Fly.io**).  
+3. **Time:** ~15–20 min if Vercel is already deployed and you only add services + worker; longer if you start from scratch.  
 4. **Fly.io only:** install the **Fly CLI** on your PC if you choose Fly: [Install flyctl](https://fly.io/docs/hands-on/install-flyctl/). Railway and Render use their websites (CLI optional).
 
 **Environment variables:** these are **secret settings** the server reads (like your `.env.local` locally). You paste them into **Vercel → Project → Settings → Environment Variables** and into your worker service using that platform’s **Variables / Secrets** UI (or `fly secrets set` on Fly).
@@ -165,7 +183,9 @@ Think of R2 as a hard drive in the cloud that both Vercel and the worker can acc
 
 ---
 
-# Part B — Deploy the website on Vercel
+# Part B — Vercel (new deploy or update existing)
+
+If the frontend is **already** on Vercel, skip **B2** and go straight to **B3**: open **Settings → Environment Variables**, verify every variable, set **`APP_URL`** to your live URL, then **Deployments → … → Redeploy** production. Push new commits via **B1** when you change the app code.
 
 ## B1. Put code on GitHub (full steps)
 
@@ -202,15 +222,17 @@ git push -u origin main
 
 Replace `YOUR_USERNAME` / `YOUR_REPO` with your GitHub username and repo name. Use the URL GitHub shows after you create the empty repo.
 
-## B2. Create the Vercel project
+## B2. Create the Vercel project (skip if the project already exists)
 
 1. Go to [https://vercel.com](https://vercel.com) → sign up (often “Continue with GitHub”).  
 2. **Add New… → Project** → **Import** your repository.  
 3. **Important — Root Directory:** click **Edit** → set to **`frontend`** (not the repo root).  
 4. Framework should auto-detect **Next.js**.  
-5. Expand **Environment Variables** and add **each** row below (name = left, value = right).
+5. Expand **Environment Variables** and add **each** row from **B3** (or add them later under **Settings → Environment Variables** and redeploy).
 
 ### B3. Environment variables on Vercel (copy names exactly)
+
+**If the site is already deployed:** use this as a **checklist**. Missing **`REDIS_URL`**, **`S3_*`**, or a wrong **`APP_URL`** is a common reason uploads, login, or **Convert** fail. After any change here, trigger a **production redeploy**.
 
 **Database & queue**
 
@@ -249,8 +271,9 @@ Replace `YOUR_USERNAME` / `YOUR_REPO` with your GitHub username and repo name. U
 
 **After the worker has a public URL (Part C):** optionally add **`WORKER_BASE_URL`** → `https://your-worker-host...` (no trailing slash) so the site can probe **`/health`** on the worker. Conversions still work via Redis if you skip this.
 
-6. Click **Deploy**. Wait until it finishes.  
-7. Open the **production URL** → fix **`APP_URL`** + redeploy if you used a placeholder.
+**New Vercel project only:** click **Deploy**, wait for it to finish, then set **`APP_URL`** to the real URL Vercel shows and **redeploy** if you used a placeholder first.
+
+**Existing Vercel project:** **Deployments** tab → open the latest production deployment menu → **Redeploy** whenever you change environment variables or want to pick up the latest Git commit.
 
 ---
 
@@ -402,7 +425,7 @@ You want to see the worker running and callbacks targeting your Vercel URL. Fly 
 
 # Part D — Test everything (same as local)
 
-1. Open your **Vercel URL**.  
+1. Open your **live site** (your Vercel production URL or custom domain).  
 2. **Register** a test user → if approval is on, they stay **pending** until an admin approves them.  
 3. **Register / log in** with an email that is in **`ADMIN_EMAILS_FROM_CONFIG`** in `frontend/src/lib/admin-config.ts` **or** listed in **`ADMIN_EMAIL` / `ADMIN_EMAILS`** on Vercel → open **`/admin`** → **Approve** the test user if they are still pending.  
 4. Log in as the test user → upload a PDF → **Convert** → wait for preview/download.  
