@@ -1,5 +1,7 @@
 # Free-tier deployment (full stack)
 
+**Fast path — one checklist from zero to live URL:** open **`DEPLOY-START-TO-FINISH.md`**.
+
 **Running the converter on your PC first?** Use **`SETUP-AND-DEPLOY.md`** (Docker + `.env` + Next + worker).
 
 ## Start now (do these in order)
