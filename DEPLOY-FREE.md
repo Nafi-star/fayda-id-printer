@@ -1,5 +1,7 @@
 # Free-tier deployment (full stack)
 
+**Running the converter on your PC first?** Use **`SETUP-AND-DEPLOY.md`** (Docker + `.env` + Next + worker).
+
 ## Start now (do these in order)
 
 **Repo / CI:** Pushing to `main` runs `.github/workflows/ci.yml` (Next.js production build). Fix failures before relying on Render.

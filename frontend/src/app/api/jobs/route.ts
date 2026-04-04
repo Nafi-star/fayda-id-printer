@@ -71,13 +71,29 @@ export async function POST(req: NextRequest) {
 
   const colorMode = body.colorMode === "bw" ? "bw" : "color";
 
-  await pushConversionJob({
-    job_id: jobId,
-    user_id: user.id,
-    input_file_key: body.inputFileKey,
-    output_prefix: `users/${user.id}/outputs`,
-    color_mode: colorMode,
-  });
+  try {
+    await pushConversionJob({
+      job_id: jobId,
+      user_id: user.id,
+      input_file_key: body.inputFileKey,
+      output_prefix: `users/${user.id}/outputs`,
+      color_mode: colorMode,
+    });
+  } catch (err) {
+    const hint =
+      "Could not reach the job queue. From the project root run: docker compose up -d redis   " +
+      "and ensure REDIS_URL in frontend/.env.local is redis://127.0.0.1:6379/0";
+    const detail = err instanceof Error ? err.message : String(err);
+    await db.query(
+      `
+      UPDATE jobs
+      SET status = 'failed', error_message = $2, updated_at = NOW()
+      WHERE id = $1
+      `,
+      [jobId, `${hint} (${detail})`],
+    );
+    return NextResponse.json({ message: hint, code: "QUEUE_UNAVAILABLE" }, { status: 503 });
+  }
 
   return NextResponse.json({ jobId, status: "queued" }, { status: 201 });
 }
