@@ -1,0 +1,75 @@
+# Render blueprint (free tier): web app + worker. Set env vars in the Render dashboard.
+# https://render.com/docs/blueprint-spec
+#
+# Prereqs (free): Neon Postgres, Upstash Redis, Cloudflare R2 (or other S3-compatible).
+# Use the same DATABASE_URL, REDIS_URL, S3_*, WORKER_CALLBACK_TOKEN on BOTH services.
+
+services:
+  - type: web
+    name: fayda-frontend
+    runtime: node
+    region: oregon
+    plan: free
+    rootDir: frontend
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /login
+    envVars:
+      - key: NODE_VERSION
+        value: "20.18.0"
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: S3_ENDPOINT
+        sync: false
+      - key: S3_REGION
+        value: auto
+      - key: S3_ACCESS_KEY
+        sync: false
+      - key: S3_SECRET_KEY
+        sync: false
+      - key: S3_BUCKET_INPUT
+        sync: false
+      - key: S3_BUCKET_OUTPUT
+        sync: false
+      - key: S3_FORCE_PATH_STYLE
+        value: "true"
+      - key: WORKER_CALLBACK_TOKEN
+        sync: false
+      - key: ENFORCE_FREE_TRIAL_LIMIT
+        value: "false"
+
+  - type: web
+    name: fayda-worker
+    runtime: docker
+    region: oregon
+    plan: free
+    dockerfilePath: ./worker/Dockerfile
+    dockerContext: ./worker
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: FRONTEND_BASE_URL
+        sync: false
+      - key: WORKER_CALLBACK_TOKEN
+        sync: false
+      - key: S3_ENDPOINT
+        sync: false
+      - key: S3_REGION
+        value: auto
+      - key: S3_ACCESS_KEY
+        sync: false
+      - key: S3_SECRET_KEY
+        sync: false
+      - key: S3_BUCKET_INPUT
+        sync: false
+      - key: S3_BUCKET_OUTPUT
+        sync: false
+      - key: S3_FORCE_PATH_STYLE
+        value: "true"
+      - key: APP_ENV
+        value: production

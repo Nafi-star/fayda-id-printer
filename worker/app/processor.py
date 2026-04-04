@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import io
 import logging
-import math
 import time
 from pathlib import Path
 from typing import Literal
@@ -26,9 +25,9 @@ CARD_H = 640
 # Cap PDF raster longest side — enough for sharp downscale to the card, much faster than full 300dpi page.
 PDF_RASTER_MAX_DIM = 1600
 # Quality multiplier for rendering. Keep near 1x so we don't rasterize huge pages.
-PDF_RENDER_QUALITY_SCALE = 1.0
+PDF_RENDER_QUALITY_SCALE = 0.95
 # Hard cap on equivalent DPI to keep rendering fast.
-PDF_RENDER_DPI_CAP = 180
+PDF_RENDER_DPI_CAP = 150
 
 # If enabled, removes mostly-white borders before fitting to the card.
 AUTO_CROP_ENABLED = True
@@ -37,12 +36,12 @@ AUTO_CROP_ENABLED = True
 # Lower value -> more pixels treated as content -> safer (less aggressive cropping).
 AUTO_CROP_WHITE_THRESHOLD = 235
 # Padding added back around the detected content bbox.
-# Keep small so we don't re-introduce whitespace.
-# Increase slightly to avoid cutting small text / edges.
-AUTO_CROP_PADDING_PX = 10
+# Keep small so we don't re-introduce whitespace; large enough to keep labels readable.
+AUTO_CROP_PADDING_PX = 12
 
-# Corner-background auto-crop is much slower (Python pixel loops). Disable for speed.
-AUTO_CROP_USE_CORNER_BACKGROUND = False
+# Corner-background auto-crop is slower; run only as a fallback when quick crop
+# failed to remove enough outer page whitespace.
+AUTO_CROP_USE_CORNER_BACKGROUND = True
 
 # Corner-background auto-crop settings:
 # - We sample the top-left/top-right/bottom-left/bottom-right corners to estimate the background color.
@@ -52,7 +51,7 @@ AUTO_CROP_USE_CORNER_BACKGROUND = False
 # Larger sample gives a better estimate of background color.
 AUTO_CROP_CORNER_SAMPLE_SIZE = 16  # px
 # Lower tolerance = more aggressive cropping (less leftover margins).
-AUTO_CROP_CORNER_TOLERANCE = 12  # 0-255 avg color-distance threshold
+AUTO_CROP_CORNER_TOLERANCE = 10  # 0-255 avg color-distance threshold
 
 
 _s3_client = None
@@ -235,9 +234,10 @@ def _auto_crop_by_corner_background(work_rgb: Image.Image) -> Image.Image:
 
 def _fit_to_card(img: Image.Image, color_mode: ColorMode) -> Image.Image:
     """
-    Fit the source image to the card WITHOUT cropping the important edges.
-    We crop mostly-white margins (safe content bbox) and then letterbox (contain)
-    onto the card canvas.
+    Full ID visible, no outer page margins, no letterbox canvas:
+    - Auto-crop trims scanner/PDF whitespace around the card.
+    - Uniform resize so the longest side matches OUTPUT_MAX_PX (~print-ready);
+      aspect ratio is preserved, so nothing is cropped and no white bars are added.
     """
     work_rgb = img.convert("RGB")
 
@@ -247,33 +247,42 @@ def _fit_to_card(img: Image.Image, color_mode: ColorMode) -> Image.Image:
         work_rgb.thumbnail((PDF_RASTER_MAX_DIM, PDF_RASTER_MAX_DIM), Image.Resampling.LANCZOS)
 
     if AUTO_CROP_ENABLED:
-        # For speed, use fast near-white margin cropping by default.
-        # Optionally enable corner-background crop if you see teal/gray backgrounds.
+        orig_w, orig_h = work_rgb.size
+        # Fast first pass: near-white crop.
+        fast_crop = _auto_crop_margins(work_rgb)
+        work_rgb = fast_crop
+
+        # If fast crop barely changed area, we likely still have big page margins.
+        # Then use corner-background crop as a stronger fallback.
         if AUTO_CROP_USE_CORNER_BACKGROUND:
-            cropped = _auto_crop_by_corner_background(work_rgb)
-            if cropped.size != work_rgb.size:
-                work_rgb = cropped
+            orig_area = max(1, orig_w * orig_h)
+            fast_area = work_rgb.size[0] * work_rgb.size[1]
+            fast_ratio = fast_area / orig_area
+            if fast_ratio > 0.78:
+                stronger = _auto_crop_by_corner_background(work_rgb)
+                if stronger.size != work_rgb.size:
+                    work_rgb = stronger
 
-        # Always do a near-white cleanup pass (fast and conservative).
-        work_rgb = _auto_crop_margins(work_rgb)
+    src_w, src_h = work_rgb.size
+    if src_w <= 0 or src_h <= 0:
+        return Image.new("RGB", (CARD_W, CARD_H), (255, 255, 255))
 
-    # Letterbox: scale to fit inside the card; never crop edges.
-    canvas = Image.new("RGB", (CARD_W, CARD_H), (255, 255, 255))
-    work = work_rgb.copy()
-    work.thumbnail((CARD_W, CARD_H), Image.Resampling.LANCZOS)
-
-    x = (CARD_W - work.width) // 2
-    y = (CARD_H - work.height) // 2
-    canvas.paste(work, (x, y))
+    # Wallet-class resolution: match ~long side of nominal card canvas, no cropping.
+    output_max_px = max(CARD_W, CARD_H)
+    longest = max(src_w, src_h)
+    scale = output_max_px / float(longest)
+    dst_w = max(1, int(round(src_w * scale)))
+    dst_h = max(1, int(round(src_h * scale)))
+    out = work_rgb.resize((dst_w, dst_h), Image.Resampling.LANCZOS)
 
     if color_mode == "bw":
-        return canvas.convert("L").convert("RGB")
-    return canvas
+        return out.convert("L").convert("RGB")
+    return out
 
 
 def process_conversion_job(job: ConversionJob) -> ConversionResult:
     """
-    Render first PDF page or a screenshot to a high-resolution PNG on a wallet-size canvas.
+    Render first PDF page or a screenshot to a high-resolution PNG (auto-cropped, aspect preserved).
     """
     start_t = time.perf_counter()
     input_key = job.input_file_key
@@ -317,12 +326,11 @@ def process_conversion_job(job: ConversionJob) -> ConversionResult:
             longest_pt = max(w_pt, h_pt)
             if longest_pt <= 0:
                 raise ValueError("Invalid PDF page size")
-            # Render close to final card size. w_pt/h_pt are in PDF points;
-            # matrix scale converts points -> pixels.
-            scale_x = (CARD_W * PDF_RENDER_QUALITY_SCALE) / w_pt
-            scale_y = (CARD_H * PDF_RENDER_QUALITY_SCALE) / h_pt
-            # Use "cover" scaling to avoid letterbox whitespace.
-            scale_pp = min(max(scale_x, scale_y), PDF_RENDER_DPI_CAP / 72)
+            # Render full page in view (contain): never clip PDF content at raster time.
+            # w_pt/h_pt are in PDF points; matrix scale converts points -> pixels.
+            scale_fit_w = (CARD_W * PDF_RENDER_QUALITY_SCALE) / w_pt
+            scale_fit_h = (CARD_H * PDF_RENDER_QUALITY_SCALE) / h_pt
+            scale_pp = min(scale_fit_w, scale_fit_h, PDF_RENDER_DPI_CAP / 72)
             mat = fitz.Matrix(scale_pp, scale_pp)
             pix = page.get_pixmap(matrix=mat, alpha=False)
             pil_image = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
@@ -344,12 +352,7 @@ def process_conversion_job(job: ConversionJob) -> ConversionResult:
 
     png_bytes = out_buf.getvalue()
 
-    # Always write to local output for filesystem fallback (and for easier debugging).
-    local_out_path = _local_output_path(output_key)
-    local_out_path.parent.mkdir(parents=True, exist_ok=True)
-    local_out_path.write_bytes(png_bytes)
-
-    # Then also try uploading to S3 (best-effort).
+    # Upload output to S3 (primary storage for Vercel + remote worker deployment).
     t_upload0 = time.perf_counter()
     try:
         s3.put_object(
@@ -359,7 +362,8 @@ def process_conversion_job(job: ConversionJob) -> ConversionResult:
             ContentType="image/png",
         )
     except Exception:
-        logger.exception("S3 upload failed; local output was written instead. key=%s", output_key)
+        logger.exception("S3 upload failed. key=%s", output_key)
+        raise
     t_upload1 = time.perf_counter()
 
     # Note: render time is roughly included between download and encode.

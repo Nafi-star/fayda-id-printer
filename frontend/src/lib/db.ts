@@ -1,14 +1,31 @@
-import { Pool } from "pg";
+import { Pool, type QueryResult, type QueryResultRow } from "pg";
 
-const databaseUrl = process.env.DATABASE_URL;
+let pool: Pool | null = null;
 
-if (!databaseUrl) {
-  throw new Error("DATABASE_URL is not configured.");
+function getPool(): Pool {
+  if (pool) return pool;
+  const databaseUrl = process.env.DATABASE_URL;
+  if (!databaseUrl) {
+    throw new Error("DATABASE_URL is not configured.");
+  }
+  pool = new Pool({
+    connectionString: databaseUrl,
+    max: 10,
+    idleTimeoutMillis: 20_000,
+    connectionTimeoutMillis: 10_000,
+  });
+  return pool;
 }
 
-export const db = new Pool({
-  connectionString: databaseUrl,
-});
+/** Lazy pool so `next build` can run without DATABASE_URL until a route executes. */
+export const db = {
+  query<R extends QueryResultRow = QueryResultRow>(
+    text: string,
+    params?: unknown[],
+  ): Promise<QueryResult<R>> {
+    return getPool().query<R>(text, params);
+  },
+};
 
 let schemaInitialized = false;
 

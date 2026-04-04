@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 import { AppShell } from "@/components/app-shell";
 import { JobCard, type JobCardModel } from "@/components/job-card";
@@ -17,6 +17,15 @@ type UsageInfo = {
   isUnlimited: boolean;
 };
 
+/** Server + first hydrated client frame match (avoids disabled-button hydration warnings). */
+function useHydrated() {
+  return useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false,
+  );
+}
+
 export default function DashboardPage() {
   const router = useRouter();
   const { t, locale } = useI18n();
@@ -27,7 +36,7 @@ export default function DashboardPage() {
   const [mode, setMode] = useState<"pdf" | "image">("pdf");
   const [colorMode, setColorMode] = useState<"color" | "bw">("color");
   const [loading, setLoading] = useState(true);
-  const [isClient, setIsClient] = useState(false);
+  const hydrated = useHydrated();
   const [converting, setConverting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pendingJobId, setPendingJobId] = useState<string | null>(null);
@@ -60,10 +69,6 @@ export default function DashboardPage() {
     }
     return true;
   }, [router, t]);
-
-  useEffect(() => {
-    queueMicrotask(() => setIsClient(true));
-  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -174,8 +179,9 @@ export default function DashboardPage() {
   const acceptAttr = mode === "pdf" ? "application/pdf,.pdf" : "image/png,image/jpeg,image/jpg,image/webp,.png,.jpg,.jpeg,.webp";
   const dropHint = mode === "pdf" ? t("dashboard.dropPdf") : t("dashboard.dropImage");
 
-  const trialExhausted =
-    usage && !usage.isUnlimited && usage.remaining !== null && usage.remaining <= 0;
+  const trialExhausted = Boolean(
+    usage && !usage.isUnlimited && usage.remaining !== null && usage.remaining <= 0,
+  );
 
   const trialProgressPct =
     usage && !usage.isUnlimited && usage.freeTrialLimit && usage.freeTrialLimit > 0
@@ -283,9 +289,7 @@ export default function DashboardPage() {
 
           <button
             type="button"
-            // Avoid SSR/client hydration mismatches by keeping the disabled value
-            // stable between the server render and the first client render.
-            disabled={!isClient || converting || loading || Boolean(trialExhausted)}
+            disabled={!hydrated || loading || converting || trialExhausted}
             onClick={runConversion}
             className="mt-6 h-12 w-full rounded-full bg-[#3b82f6] text-base font-bold text-white shadow-lg shadow-blue-500/25 transition hover:bg-[#2563eb] disabled:cursor-not-allowed disabled:opacity-50 sm:mt-8 sm:h-14 sm:text-lg"
           >

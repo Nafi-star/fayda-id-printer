@@ -1,13 +1,22 @@
 import Redis from "ioredis";
 
-const redisUrl = process.env.REDIS_URL;
-
-if (!redisUrl) {
-  throw new Error("REDIS_URL is not configured.");
-}
-
 const queueName = "jobs:convert";
-const redis = new Redis(redisUrl, { maxRetriesPerRequest: 3 });
+
+let redis: Redis | null = null;
+
+function getRedis(): Redis {
+  if (redis) return redis;
+  const redisUrl = process.env.REDIS_URL;
+  if (!redisUrl) {
+    throw new Error("REDIS_URL is not configured.");
+  }
+  const useTls = redisUrl.startsWith("rediss://");
+  redis = new Redis(redisUrl, {
+    maxRetriesPerRequest: 3,
+    ...(useTls ? { tls: { rejectUnauthorized: true } } : {}),
+  });
+  return redis;
+}
 
 export type QueuePayload = {
   job_id: string;
@@ -18,5 +27,5 @@ export type QueuePayload = {
 };
 
 export async function pushConversionJob(payload: QueuePayload) {
-  await redis.rpush(queueName, JSON.stringify(payload));
+  await getRedis().rpush(queueName, JSON.stringify(payload));
 }
