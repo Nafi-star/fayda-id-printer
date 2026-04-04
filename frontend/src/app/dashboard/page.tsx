@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { AppShell } from "@/components/app-shell";
 import { JobCard, type JobCardModel } from "@/components/job-card";
@@ -17,15 +17,6 @@ type UsageInfo = {
   isUnlimited: boolean;
 };
 
-/** Server + first hydrated client frame match (avoids disabled-button hydration warnings). */
-function useHydrated() {
-  return useSyncExternalStore(
-    () => () => {},
-    () => true,
-    () => false,
-  );
-}
-
 export default function DashboardPage() {
   const router = useRouter();
   const { t, locale } = useI18n();
@@ -36,7 +27,8 @@ export default function DashboardPage() {
   const [mode, setMode] = useState<"pdf" | "image">("pdf");
   const [colorMode, setColorMode] = useState<"color" | "bw">("color");
   const [loading, setLoading] = useState(true);
-  const hydrated = useHydrated();
+  /** false on server and first client paint — avoids Convert button disabled mismatch with Next SSR. */
+  const [mounted, setMounted] = useState(false);
   const [converting, setConverting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pendingJobId, setPendingJobId] = useState<string | null>(null);
@@ -69,6 +61,10 @@ export default function DashboardPage() {
     }
     return true;
   }, [router, t]);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -289,7 +285,7 @@ export default function DashboardPage() {
 
           <button
             type="button"
-            disabled={!hydrated || loading || converting || trialExhausted}
+            disabled={!mounted || loading || converting || trialExhausted}
             onClick={runConversion}
             className="mt-6 h-12 w-full rounded-full bg-[#3b82f6] text-base font-bold text-white shadow-lg shadow-blue-500/25 transition hover:bg-[#2563eb] disabled:cursor-not-allowed disabled:opacity-50 sm:mt-8 sm:h-14 sm:text-lg"
           >
