@@ -146,6 +146,15 @@ If status stays **Queued**:
 - Wrong `REDIS_URL` or worker not running
 - `FRONTEND_BASE_URL` wrong → job runs but DB never updates to `completed`
 
+### Local Windows: `httpx.ConnectError` / jobs never finish
+
+1. **Start Next.js first:** in `frontend`, run `npm run dev` (default port **3000**).
+2. In **`worker/.env`**, set `FRONTEND_BASE_URL=http://127.0.0.1:3000` (not `localhost` if your machine resolves it oddly).
+3. **`WORKER_CALLBACK_TOKEN`** must be **identical** in `worker/.env` and `frontend/.env.local`.
+4. Restart the worker after changing `.env`.
+
+The worker **retries** callbacks and still runs conversion even if the first “processing” ping fails.
+
 ---
 
 ## 7) Optional: reduce “sleep” pain (free)
