@@ -2,6 +2,8 @@
 
 ## Start now (do these in order)
 
+**Repo / CI:** Pushing to `main` runs `.github/workflows/ci.yml` (Next.js production build). Fix failures before relying on Render.
+
 1. **GitHub:** Push this repository to GitHub (see commands below if you have not yet).
 2. **Neon:** Create DB → copy `DATABASE_URL` (pooled URL if offered).
 3. **Upstash:** Create Redis → copy `REDIS_URL` (use `rediss://` if available).
@@ -10,6 +12,8 @@
 6. **Render:** Dashboard → **New** → **Blueprint** → connect repo → select `render.yaml` → paste env vars when asked.
 7. **After frontend URL exists:** Set `FRONTEND_BASE_URL` on the worker → **Manual Deploy** worker again.
 8. **Test:** Open `https://…onrender.com/login` → register → convert a PDF.
+
+**Only you can do in the browser:** Neon, Upstash, R2, and Render account steps — the codebase cannot log in for you. After each Git push, use Render **Manual Deploy → Deploy latest commit** (or enable auto-deploy) so production matches GitHub.
 
 Fill blanks using `deploy/RENDER-ENV-CHECKLIST.txt` as a worksheet (keep secrets out of git).
 
