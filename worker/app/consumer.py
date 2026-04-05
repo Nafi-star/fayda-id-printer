@@ -23,7 +23,12 @@ _RETRYABLE_NOTIFY = (
 )
 
 
-async def _notify_frontend(payload: dict, *, attempts: int = 5) -> bool:
+async def _notify_frontend(
+    payload: dict,
+    *,
+    attempts: int = 5,
+    max_retry_delay_s: float = 2.0,
+) -> bool:
     """
     POST job status to Next.js. Retries on connection issues.
     Returns True if Next acknowledged (2xx), False otherwise.
@@ -44,7 +49,7 @@ async def _notify_frontend(payload: dict, *, attempts: int = 5) -> bool:
             return True
         except _RETRYABLE_NOTIFY as exc:
             last_err = exc
-            delay = min(2.0, 0.4 * (2**i))
+            delay = min(max_retry_delay_s, 0.4 * (2**i))
             logger.warning(
                 "Callback retry %s/%s for job=%s: %s",
                 i + 1,
@@ -88,7 +93,7 @@ async def run_consumer(stop_event: asyncio.Event) -> None:
 
     try:
         while not stop_event.is_set():
-            item = await redis.blpop(queue_name, timeout=3)
+            item = await redis.blpop(queue_name, timeout=1)
             if not item:
                 continue
 
@@ -100,16 +105,15 @@ async def run_consumer(stop_event: asyncio.Event) -> None:
                 logger.exception("Invalid queue payload.")
                 continue
 
-            # Do not abort the job if "processing" ping fails (Next may still be starting).
-            if not await _notify_frontend(
-                {"jobId": job.job_id, "status": "processing"},
-                attempts=4,
-            ):
-                logger.warning(
-                    "Skipped processing callback for job=%s — still converting. "
-                    "If this repeats, start Next.js and set FRONTEND_BASE_URL (try http://127.0.0.1:3000 on Windows).",
-                    job.job_id,
+            # Do not wait on "processing" — HTTP callbacks to localhost/Vercel can add many seconds
+            # of retries before PDF work starts. UI still updates when the "completed" callback lands.
+            asyncio.create_task(
+                _notify_frontend(
+                    {"jobId": job.job_id, "status": "processing"},
+                    attempts=2,
+                    max_retry_delay_s=0.35,
                 )
+            )
 
             try:
                 result = await asyncio.to_thread(process_conversion_job, job)

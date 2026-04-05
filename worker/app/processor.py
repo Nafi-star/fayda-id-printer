@@ -24,7 +24,7 @@ ColorMode = Literal["color", "bw"]
 CARD_W = 1016
 CARD_H = 640
 # Cap PDF raster longest side (~output is 1016 px); lower = faster render with still-sharp prints.
-PDF_RASTER_MAX_DIM = 1120
+PDF_RASTER_MAX_DIM = 1024
 # Quality multiplier for rendering. Keep near 1x so we don't rasterize huge pages.
 PDF_RENDER_QUALITY_SCALE = 0.95
 # Hard cap on equivalent DPI to keep rendering fast (final card image is ~1016 px long side).
@@ -367,7 +367,8 @@ def _fit_to_card(
     scale = output_max_px / float(longest)
     dst_w = max(1, int(round(src_w * scale)))
     dst_h = max(1, int(round(src_h * scale)))
-    out = work_rgb.resize((dst_w, dst_h), Image.Resampling.BICUBIC)
+    # BILINEAR is noticeably faster than BICUBIC at ~wallet print size; quality remains good.
+    out = work_rgb.resize((dst_w, dst_h), Image.Resampling.BILINEAR)
 
     if color_mode == "bw":
         return out.convert("L").convert("RGB")

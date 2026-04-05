@@ -1,5 +1,6 @@
-# Verifies the Next.js app builds without your local .env.local (Render-like).
+# Catches broken frontend builds before you deploy to Vercel.
 name: CI
+
 on:
   push:
     branches: [main]
@@ -7,7 +8,7 @@ on:
     branches: [main]
 
 jobs:
-  frontend-build:
+  frontend:
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -21,7 +22,3 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
       - run: npm run build
-        env:
-          # Not contacted during `next build`; satisfies modules that read env at runtime only.
-          DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/ci
-          REDIS_URL: redis://127.0.0.1:6379

@@ -125,7 +125,7 @@ export default function DashboardPage() {
       }
     }
 
-    pollRef.current = setInterval(poll, 500);
+    pollRef.current = setInterval(poll, 300);
     poll();
 
     return () => {

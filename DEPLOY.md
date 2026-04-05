@@ -2,6 +2,42 @@
 
 This guide deploys **Next.js** on [Vercel](https://vercel.com) and the **Python worker** on [Render](https://render.com). Follow the steps **in order**. Do **not** commit `.env` files — paste secrets only in Vercel and Render dashboards.
 
+No cloud deploy is literally impossible to fail (wrong paste, expired keys, typos), but following **§0** and the checklists below prevents **most** repeat failures.
+
+---
+
+## 0 — Before Vercel / Render: prove the build locally
+
+Run this on your PC from the **repository root**. If this fails, fix it **before** touching Vercel — the same command is what CI runs on every push to `main`.
+
+```powershell
+cd path\to\fayda-id-printer\frontend
+npm ci
+npm run build
+```
+
+- Use **Node 20+** (matches GitHub Actions and Vercel defaults).
+- If `npm ci` errors, run `npm install` once, commit `package-lock.json`, then use `npm ci` again.
+
+**URLs (critical):** Every production URL you paste must be **exact**:
+
+- `https://your-app.vercel.app` — **no** trailing `/`
+- Same host for **`APP_URL`** (Vercel) and **`FRONTEND_BASE_URL`** (Render)
+
+**One queue, one secret:** **`REDIS_URL`** and **`WORKER_CALLBACK_TOKEN`** must be **character-for-character identical** on Vercel and Render.
+
+---
+
+## Common deploy failures (quick map)
+
+| What failed | Usual cause |
+|-------------|-------------|
+| Vercel **Build** red | Wrong **Root Directory** (must be `frontend`), or `npm run build` errors — run **§0**. |
+| Vercel **runtime** 500 on login | Missing **`DATABASE_URL`** or wrong Neon string. |
+| Upload / convert broken in prod | Missing **`S3_*`** on Vercel, or **CORS** not set on bucket **`fayda-input`** (**§1.3.1**). |
+| Job stuck **Queued** | Render worker asleep (free tier), wrong **`REDIS_URL`** on worker, or worker crash — **Render → Logs**. |
+| Job finishes but UI never updates | **`FRONTEND_BASE_URL`** ≠ your Vercel URL, or **`WORKER_CALLBACK_TOKEN`** mismatch. |
+
 ---
 
 ## What you are building
@@ -88,6 +124,13 @@ This is **`WORKER_CALLBACK_TOKEN`**. You will paste the **same** value on **Verc
 
 - **Root Directory:** **`frontend`** (click **Edit**, set to `frontend`, not the repo root).
 - Framework: **Next.js** (auto).
+- **Build / Output:** leave defaults (Vercel runs `npm run build` inside `frontend`). Do **not** enable “static export” unless you know you need it.
+
+### 2.2a Render build settings (must match)
+
+- **Root Directory:** **`worker`**
+- **Environment:** **Docker**
+- **Dockerfile path:** `Dockerfile` (relative to `worker/` — Render uses the file at `worker/Dockerfile` in the repo)
 
 ### 2.3 Environment variables (Production)
 
@@ -223,3 +266,24 @@ See **`deployment/production-env.template.txt`** for a single list of variable n
 ## Local development
 
 You do **not** need Vercel or Render on your machine for daily work. Use Docker Compose and `frontend/.env.local` + `worker/.env` per the project’s `.env.example` files.
+
+---
+
+## End-to-end order (copy checklist)
+
+1. Neon → `DATABASE_URL`  
+2. Upstash → `REDIS_URL`  
+3. R2 or Supabase buckets + **CORS on `fayda-input`** → all `S3_*`  
+4. Resend → `RESEND_API_KEY`, `EMAIL_FROM`  
+5. Generate → `WORKER_CALLBACK_TOKEN` (same everywhere)  
+6. Vercel: import repo, **Root = `frontend`**, add **all** env vars from **§2.3**, Deploy  
+7. Set **`APP_URL`** to live Vercel URL → **Redeploy**  
+8. Render: **Web Service**, **Root = `worker`**, Docker, add env (**§3.2**), **`FRONTEND_BASE_URL`** = same host as **`APP_URL`**  
+9. Vercel: optional **`WORKER_BASE_URL`** = Render URL → Redeploy  
+10. Test: register → upload → convert → forgot password  
+
+---
+
+## Honest note
+
+Hosting providers, DNS, and API keys change. If a deploy fails, open **Vercel Build Logs** or **Render Logs**, search this doc’s **Common deploy failures** table, and fix the one line that is wrong — usually a URL, token, or missing env var.
