@@ -64,6 +64,8 @@ export const messages: Record<Locale, Record<string, unknown>> = {
       errNeedPdf: "Please choose a Fayda PDF first.",
       errNeedImage: "Please choose a screenshot (PNG or JPG).",
       errGeneric: "Something went wrong. Try again.",
+      errVercelUploadLimit:
+        "This site is hosted on Vercel, which limits each upload to about 4 MB. Use a smaller PDF, export a lower‑size file from Fayda, or try a screenshot under 4 MB.",
       errStart: "Could not start conversion.",
       errLoadJobs: "Failed to load jobs.",
     },
@@ -178,6 +180,8 @@ export const messages: Record<Locale, Record<string, unknown>> = {
       errNeedPdf: "እባክዎ የፋይዳ PDF ይምረጡ።",
       errNeedImage: "እባክዎ ቅጽበታዊ (PNG/JPG) ይምረጡ።",
       errGeneric: "ስህተት። እንደገና ይሞክሩ።",
+      errVercelUploadLimit:
+        "ይህ ጣቢያ በ Vercel ላይ ነው — እያንዳንዱ ጫኝ ወደ 4 ሜባ ይገደባል። ትንሽ PDF ይጠቀሙ ወይም ቅጽበታይ ይሞክሩ።",
       errStart: "መቀየር ማስጀመር አልተቻለም።",
       errLoadJobs: "ሥራ መጫን አልተሳካም።",
     },

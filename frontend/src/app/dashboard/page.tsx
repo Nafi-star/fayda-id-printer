@@ -133,6 +133,13 @@ export default function DashboardPage() {
       return;
     }
 
+    // Vercel serverless routes reject bodies over ~4.5 MB before our API runs — avoid opaque "Something went wrong."
+    const vercelMax = 4 * 1024 * 1024;
+    if (process.env.NEXT_PUBLIC_VERCEL === "1" && selectedFile.size > vercelMax) {
+      setError(t("dashboard.errVercelUploadLimit"));
+      return;
+    }
+
     setConverting(true);
     setPreviewJob(null);
     try {

@@ -437,6 +437,7 @@ You want to see the worker running and callbacks targeting your Vercel URL. Fly 
 
 | Symptom | What to check |
 |---------|----------------|
+| “Something went wrong” right after **Convert** (worked locally) | **Vercel** limits each upload to about **4.5 MB** for serverless routes ([Vercel limits](https://vercel.com/docs/functions/limitations)). Large Fayda PDFs work on your PC but fail in production — try a **smaller PDF**, a **screenshot under ~4 MB**, or host uploads differently later. The app now warns when the file is too large for Vercel. |
 | Convert never finishes | Worker **deployed** and **not sleeping**? **Logs** on Railway / Render / Fly. Same **`REDIS_URL`** on Vercel and worker? Same **`WORKER_CALLBACK_TOKEN`**? **`FRONTEND_BASE_URL`** = exact Vercel URL (https, no trailing slash)? |
 | Upload error | All **`S3_*`** on Vercel correct? Buckets exist? |
 | Worker cannot read file | **`S3_*`** keys, endpoint, **`S3_FORCE_PATH_STYLE`**, and bucket names **identical** on Vercel and worker |

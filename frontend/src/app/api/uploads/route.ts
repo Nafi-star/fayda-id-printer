@@ -3,7 +3,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { getUserFromSession } from "@/lib/auth";
 import { ensureStorageDirs, saveUploadToInput } from "@/lib/storage";
 
-const MAX_BYTES = 25 * 1024 * 1024; // 25 MB
+/** Vercel serverless request bodies are capped (~4.5 MB). Stay under that on production Vercel. */
+const VERCEL_SAFE_MAX_BYTES = 4 * 1024 * 1024;
+const DEFAULT_MAX_BYTES = 25 * 1024 * 1024; // 25 MB (local / self-hosted)
+
+const MAX_BYTES =
+  process.env.VERCEL === "1" ? Math.min(DEFAULT_MAX_BYTES, VERCEL_SAFE_MAX_BYTES) : DEFAULT_MAX_BYTES;
 
 function allowedUpload(name: string, mime: string): boolean {
   const n = name.toLowerCase();
@@ -35,7 +40,11 @@ export async function POST(req: NextRequest) {
 
   const bytes = new Uint8Array(await file.arrayBuffer());
   if (bytes.length > MAX_BYTES) {
-    return NextResponse.json({ message: "File is too large (max 25 MB)." }, { status: 400 });
+    const msg =
+      process.env.VERCEL === "1"
+        ? "File is too large for Vercel hosting (max about 4 MB per upload). Compress the PDF or use a smaller export."
+        : `File is too large (max ${Math.floor(MAX_BYTES / (1024 * 1024))} MB).`;
+    return NextResponse.json({ message: msg }, { status: 400 });
   }
 
   await ensureStorageDirs();
