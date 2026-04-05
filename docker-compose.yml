@@ -33,6 +33,29 @@ services:
     volumes:
       - minio_data:/data
 
+  # Conversion worker: same Redis as Next.js on the host (port 6379). Callbacks to Next at host:3000.
+  # Run: docker compose up -d redis worker  then  cd frontend && npm run dev
+  # Match WORKER_CALLBACK_TOKEN in frontend/.env.local (and optional worker/.env).
+  worker:
+    build:
+      context: ./worker
+      dockerfile: Dockerfile
+    container_name: fayda-worker
+    depends_on:
+      - redis
+    ports:
+      - "8001:8001"
+    environment:
+      PORT: "8001"
+      REDIS_URL: redis://redis:6379/0
+      FRONTEND_BASE_URL: http://host.docker.internal:3000
+      WORKER_CALLBACK_TOKEN: ${WORKER_CALLBACK_TOKEN:-dev-shared-token-change-me}
+      STORAGE_ROOT: /app/storage
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./storage:/app/storage
+
 volumes:
   postgres_data:
   minio_data:

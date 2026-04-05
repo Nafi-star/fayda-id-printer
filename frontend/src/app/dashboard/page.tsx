@@ -155,7 +155,7 @@ export default function DashboardPage() {
       if (cancelled) return;
 
       const elapsed = Date.now() - startedAt;
-      if (elapsed > 180_000) {
+      if (elapsed > 600_000) {
         clearTimer();
         if (!cancelled) {
           setPendingJobId(null);

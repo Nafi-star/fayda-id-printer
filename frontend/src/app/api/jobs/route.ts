@@ -6,6 +6,8 @@ import { getUserFromSession } from "@/lib/auth";
 import { countUserConversions, getFreeTrialConversionLimit } from "@/lib/free-trial";
 import { pushConversionJob } from "@/lib/queue";
 
+export const dynamic = "force-dynamic";
+
 type CreateJobBody = {
   inputFileKey: string;
   colorMode?: "color" | "bw";

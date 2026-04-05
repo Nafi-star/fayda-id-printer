@@ -13,6 +13,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
 
+# Local / filesystem fallback when S3 is not configured (must not resolve to "/" in the image).
+RUN mkdir -p /app/storage/input /app/storage/output
+
 ENV PYTHONUNBUFFERED=1
 # Render sets PORT; default 8001 for local / other hosts
 EXPOSE 8001

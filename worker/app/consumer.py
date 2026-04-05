@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+from urllib.parse import urlparse
 
 import httpx
 from httpx import Timeout
@@ -12,6 +13,15 @@ from app.processor import process_conversion_job
 from app.schemas import ConversionJob
 
 logger = logging.getLogger(__name__)
+
+
+def _redis_log_target(url: str) -> str:
+    try:
+        p = urlparse(url)
+        return f"{p.scheme}://{p.hostname or '?'}:{p.port or 'default'}"
+    except Exception:
+        return "(invalid REDIS_URL)"
+
 
 # Callback flakiness (Next.js not up yet, Windows localhost, brief network blips).
 _RETRYABLE_NOTIFY = (
@@ -90,11 +100,13 @@ async def run_consumer(stop_event: asyncio.Event) -> None:
     queue_name = settings.queue_name
 
     base = resolved_frontend_base_url()
+    s3_on = bool(settings.s3_endpoint and str(settings.s3_endpoint).strip())
     logger.info(
-        "Worker consumer started. queue=%s callback=%s (from FRONTEND_BASE_URL=%s)",
+        "Worker consumer started. queue=%s redis=%s callback_base=%s s3=%s",
         queue_name,
+        _redis_log_target(settings.redis_url),
         base,
-        settings.frontend_base_url.rstrip("/"),
+        "on" if s3_on else "off (filesystem)",
     )
 
     try:

@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { db, ensureSchema } from "@/lib/db";
 
+export const dynamic = "force-dynamic";
+
 type JobUpdateBody = {
   jobId: string;
   status: "processing" | "completed" | "failed";

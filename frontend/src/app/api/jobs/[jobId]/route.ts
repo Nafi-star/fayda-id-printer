@@ -3,6 +3,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getUserFromSession } from "@/lib/auth";
 import { db, ensureSchema } from "@/lib/db";
 
+export const dynamic = "force-dynamic";
+
 type Params = { params: Promise<{ jobId: string }> };
 
 export async function GET(req: NextRequest, { params }: Params) {

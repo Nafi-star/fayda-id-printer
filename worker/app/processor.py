@@ -65,12 +65,16 @@ def _resolve_storage_root() -> Path:
     """
     Resolve the shared storage root used by Next.js:
     - If settings.storage_root is set, use it.
-    - Otherwise fall back to repo-level ./storage.
+    - Dev checkout: worker/app/processor.py -> <repo>/storage
+    - Docker image: /app/app/processor.py -> /app/storage (parents[2] would wrongly be /)
     """
     if settings.storage_root:
         return Path(settings.storage_root)
-    # processor.py: <repo>/worker/app/processor.py -> repo root is parents[2]
-    return Path(__file__).resolve().parents[2] / "storage"
+    proc = Path(__file__).resolve()
+    worker_pkg = proc.parent.parent  # .../worker (dev) or .../app (Docker WORKDIR /app)
+    if worker_pkg.name == "worker":
+        return worker_pkg.parent / "storage"
+    return worker_pkg / "storage"
 
 
 def _local_input_path(input_key: str) -> Path:
