@@ -22,6 +22,7 @@ export async function GET(req: NextRequest) {
     SELECT id, user_id, input_file_key, output_file_key, status, error_message, created_at, updated_at
     FROM jobs
     WHERE user_id = $1
+      AND COALESCE(input_file_key, '') <> '[purged]'
     ORDER BY created_at DESC
     LIMIT 50
     `,

@@ -3,6 +3,7 @@ import logging
 
 from fastapi import FastAPI
 
+from app.cleanup_scheduler import run_cleanup_scheduler
 from app.config import settings
 from app.consumer import run_consumer
 from app.processor import process_conversion_job
@@ -12,19 +13,27 @@ app = FastAPI(title=settings.app_name)
 logger = logging.getLogger(__name__)
 consumer_stop_event = asyncio.Event()
 consumer_task: asyncio.Task | None = None
+cleanup_scheduler_task: asyncio.Task | None = None
 
 
 @app.on_event("startup")
 async def startup_event() -> None:
-    global consumer_task
+    global consumer_task, cleanup_scheduler_task
     logging.basicConfig(level=settings.log_level)
     consumer_task = asyncio.create_task(run_consumer(consumer_stop_event))
+    cleanup_scheduler_task = asyncio.create_task(run_cleanup_scheduler(consumer_stop_event))
     logger.info("Worker startup complete.")
 
 
 @app.on_event("shutdown")
 async def shutdown_event() -> None:
     consumer_stop_event.set()
+    if cleanup_scheduler_task:
+        cleanup_scheduler_task.cancel()
+        try:
+            await cleanup_scheduler_task
+        except asyncio.CancelledError:
+            pass
     if consumer_task:
         await consumer_task
     logger.info("Worker shutdown complete.")

@@ -40,6 +40,15 @@ npm run build
 
 ---
 
+## Conversions & 24-hour retention (same idea as local)
+
+- **Uploaded PDFs and generated PNGs** are removed from storage when a job has been **completed or failed** for **more than 24 hours** (based on `updated_at` in the database).
+- The **worker** (Render) calls your Next.js route **`POST /api/internal/cleanup-storage`** automatically: **first run ~2 minutes after the worker starts**, then about **every 45 minutes**. It uses the same **`WORKER_CALLBACK_TOKEN`** as job callbacks.
+- After cleanup, the job row is kept for **usage / history counting**, but **`input_file_key`** is set to **`[purged]`** and **`/api/jobs`** **hides** those rows — so they **disappear from the dashboard and history list**. Downloads stop working (files are gone).
+- **Production behaves like local** as long as **Render is running**, **`FRONTEND_BASE_URL`** points at your live Vercel URL, and **`WORKER_CALLBACK_TOKEN`** matches Vercel. If the worker never runs, old files are **not** deleted automatically.
+
+---
+
 ## What you are building
 
 | Piece | Where | Role |
@@ -50,6 +59,21 @@ npm run build
 | Files (PDF/PNG) | **Cloudflare R2** or **Supabase Storage** | S3-compatible (`S3_*` vars) — **identical** on Vercel and Render |
 | PDF → image | **Render** (`worker/`) | Consumes Redis, writes results, calls your Vercel API |
 | Email | **Resend** (or SMTP) | Password reset (`RESEND_API_KEY`, `EMAIL_FROM`) |
+
+---
+
+## One sitting — what to do in order (overview)
+
+| Order | You do | Details |
+|------|--------|--------|
+| A | **§0** Local `npm run build` in `frontend` | Confirms Vercel will build |
+| B | **Step 1** Neon + Upstash + R2/Supabase + **CORS** + Resend + token | Copy every value into a private note |
+| C | **Step 2** Vercel: import repo, **Root = `frontend`**, paste **all** env vars, Deploy | Then set **`APP_URL`**, Redeploy |
+| D | **Step 3** Render: **Root = `worker`**, Docker, paste env (**same** Redis/S3/token, **`FRONTEND_BASE_URL`** = Vercel URL) | Wait for green deploy |
+| E | Vercel: add **`WORKER_BASE_URL`** = Render URL (optional) | Redeploy |
+| F | **Step 4** Open site → register → convert → forgot password | If stuck, use **Common deploy failures** table |
+
+**Same as local:** use the **same** `DATABASE_URL`, `REDIS_URL`, `S3_*`, and `WORKER_CALLBACK_TOKEN` you use in `frontend/.env.local` and `worker/.env` — only the URLs change (`APP_URL` / `FRONTEND_BASE_URL` = production Vercel).
 
 ---
 
@@ -232,6 +256,10 @@ Do **not** rely on a `.env` file inside the image for production — Render inje
 ### 3.4 Logs
 
 In Render → **Logs**: you should see the consumer starting and a line like `callback=https://your-project.vercel.app`. If you see Redis/S3/401 errors, re-check the variables above.
+
+### 3.5 24-hour cleanup (automatic)
+
+No cron job on Vercel is required. The **worker process** triggers storage cleanup against your Next app. If **`WORKER_CALLBACK_TOKEN`** is wrong, cleanup returns **401** and files will **not** be purged — fix the token and redeploy both sides.
 
 ---
 

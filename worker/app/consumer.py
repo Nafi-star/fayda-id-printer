@@ -1,13 +1,13 @@
 import asyncio
 import json
 import logging
-from urllib.parse import urlparse, urlunparse
 
 import httpx
 from httpx import Timeout
 from redis.asyncio import Redis
 
 from app.config import settings
+from app.frontend_url import resolved_frontend_base_url
 from app.processor import process_conversion_job
 from app.schemas import ConversionJob
 
@@ -24,20 +24,6 @@ _RETRYABLE_NOTIFY = (
 )
 
 
-def _callback_base_url() -> str:
-    """
-    Next.js often listens on 127.0.0.1 while 'localhost' resolves to ::1 on Windows;
-    httpx then fails with 'All connection attempts failed'. Force IPv4 loopback for local dev.
-    """
-    raw = settings.frontend_base_url.rstrip("/")
-    p = urlparse(raw)
-    if (p.hostname or "").lower() != "localhost":
-        return raw
-    port = f":{p.port}" if p.port else ""
-    netloc = f"127.0.0.1{port}"
-    return urlunparse((p.scheme, netloc, p.path or "", p.params, p.query, p.fragment))
-
-
 async def _notify_frontend(
     payload: dict,
     *,
@@ -48,7 +34,7 @@ async def _notify_frontend(
     POST job status to Next.js. Retries on connection issues.
     Returns True if Next acknowledged (2xx), False otherwise.
     """
-    base = _callback_base_url()
+    base = resolved_frontend_base_url()
     url = f"{base}/api/internal/jobs/update"
     headers = {"x-worker-token": settings.worker_callback_token}
     last_err: BaseException | None = None
@@ -103,7 +89,7 @@ async def run_consumer(stop_event: asyncio.Event) -> None:
     redis = Redis.from_url(settings.redis_url, decode_responses=True)
     queue_name = settings.queue_name
 
-    base = _callback_base_url()
+    base = resolved_frontend_base_url()
     logger.info(
         "Worker consumer started. queue=%s callback=%s (from FRONTEND_BASE_URL=%s)",
         queue_name,

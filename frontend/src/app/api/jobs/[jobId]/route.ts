@@ -22,8 +22,13 @@ export async function GET(req: NextRequest, { params }: Params) {
     [jobId, user.id],
   );
 
-  const job = result.rows[0];
+  const job = result.rows[0] as
+    | { input_file_key?: string | null }
+    | undefined;
   if (!job) return NextResponse.json({ message: "Job not found." }, { status: 404 });
+  if (job.input_file_key === "[purged]") {
+    return NextResponse.json({ message: "This conversion has expired (files removed after 24 hours)." }, { status: 404 });
+  }
 
   return NextResponse.json({ job });
 }
