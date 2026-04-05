@@ -1,8 +1,26 @@
 # Deploy Fayda ID Printer
 
-**Rule:** Vercel is only the website. **Conversion runs on Render** (`worker/`). Same **`REDIS_URL`**, same **`WORKER_CALLBACK_TOKEN`**, and **`FRONTEND_BASE_URL` on Render = `APP_URL` on Vercel** (exact string, `https://…`, **no** trailing `/`).
+**Rule:** Vercel is only the website. **Conversion runs on Render** (`worker/`). Use **`WORKER_CALLBACK_TOKEN`** on both; **`FRONTEND_BASE_URL` on Render = `APP_URL` on Vercel** (exact URL, **no** trailing `/`).
 
 Worksheet: `deployment/production-env.template.txt` · Never commit secrets.
+
+---
+
+## Easiest fix if jobs stay “Queued” (HTTP direct — no Redis queue)
+
+Vercel can call your Render worker **directly** (no Upstash queue). Set **on Vercel (Production)**:
+
+| Variable | Value |
+|----------|--------|
+| **`WORKER_HTTP_URL`** | `https://YOUR-SERVICE.onrender.com` — **no** trailing `/` |
+| **`WORKER_CALLBACK_TOKEN`** | **Same** as on Render |
+| **`S3_*`** | Same as Render (uploads + worker read/write) |
+
+**Render** still needs the worker running (Docker, `worker/`), same **`S3_*`**, same token. **`REDIS_URL`** is optional for this path (Redis is only used by the old queue consumer).
+
+Redeploy **Vercel** after saving env vars.
+
+**Note:** Vercel **Hobby** limits serverless time (~**10s**). Large PDFs may need **Vercel Pro** (longer limits) or a small test PDF for demos.
 
 ---
 

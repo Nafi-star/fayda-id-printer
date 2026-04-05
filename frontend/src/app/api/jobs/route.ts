@@ -6,6 +6,9 @@ import { getUserFromSession } from "@/lib/auth";
 import { countUserConversions, getFreeTrialConversionLimit } from "@/lib/free-trial";
 import { pushConversionJob } from "@/lib/queue";
 
+/** Vercel → Render direct HTTP conversion (no Redis). Needs Pro or small PDFs on Hobby (10s limit). */
+export const maxDuration = 300;
+
 export const dynamic = "force-dynamic";
 
 type CreateJobBody = {
@@ -72,20 +75,111 @@ export async function POST(req: NextRequest) {
     [jobId, user.id, body.inputFileKey],
   );
 
-  const colorMode = body.colorMode === "bw" ? "bw" : "color";
+  const colorMode: "color" | "bw" = body.colorMode === "bw" ? "bw" : "color";
+  const outputPrefix = `users/${user.id}/outputs`;
+
+  const workerHttp =
+    process.env.WORKER_HTTP_URL?.trim() || process.env.WORKER_BASE_URL?.trim();
+
+  const queuePayload = {
+    job_id: jobId,
+    user_id: user.id,
+    input_file_key: body.inputFileKey,
+    output_prefix: outputPrefix,
+    color_mode: colorMode,
+  };
+
+  if (workerHttp) {
+    const token = process.env.WORKER_CALLBACK_TOKEN?.trim();
+    if (!token) {
+      await db.query(
+        `UPDATE jobs SET status = 'failed', error_message = $2, updated_at = NOW() WHERE id = $1`,
+        [jobId, "WORKER_CALLBACK_TOKEN is not set on the server."],
+      );
+      return NextResponse.json(
+        { message: "Server misconfiguration: WORKER_CALLBACK_TOKEN missing." },
+        { status: 500 },
+      );
+    }
+    const base = workerHttp.replace(/\/$/, "");
+    const controller = new AbortController();
+    const kill = setTimeout(() => controller.abort(), 280_000);
+    try {
+      const res = await fetch(`${base}/convert/test`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-worker-token": token,
+        },
+        body: JSON.stringify(queuePayload),
+        signal: controller.signal,
+      });
+      clearTimeout(kill);
+      const text = await res.text();
+      if (!res.ok) {
+        await db.query(
+          `
+          UPDATE jobs
+          SET status = 'failed', error_message = $2, updated_at = NOW()
+          WHERE id = $1
+          `,
+          [jobId, `Worker HTTP ${res.status}: ${text.slice(0, 2000)}`],
+        );
+        return NextResponse.json(
+          { message: "Conversion worker failed. Check Render logs and WORKER_CALLBACK_TOKEN match.", code: "WORKER_HTTP_ERROR" },
+          { status: 502 },
+        );
+      }
+      let result: { status?: string; output_file_key?: string | null; error_message?: string | null };
+      try {
+        result = JSON.parse(text) as typeof result;
+      } catch {
+        await db.query(
+          `UPDATE jobs SET status = 'failed', error_message = $2, updated_at = NOW() WHERE id = $1`,
+          [jobId, `Invalid JSON from worker: ${text.slice(0, 500)}`],
+        );
+        return NextResponse.json({ message: "Invalid response from worker." }, { status: 502 });
+      }
+      const st = result.status === "failed" ? "failed" : "completed";
+      await db.query(
+        `
+        UPDATE jobs
+        SET status = $2,
+            output_file_key = $3,
+            error_message = $4,
+            updated_at = NOW()
+        WHERE id = $1
+        `,
+        [jobId, st, result.output_file_key ?? null, result.error_message ?? null],
+      );
+      return NextResponse.json({ jobId, status: st }, { status: 201 });
+    } catch (err) {
+      clearTimeout(kill);
+      const detail = err instanceof Error ? err.message : String(err);
+      await db.query(
+        `
+        UPDATE jobs
+        SET status = 'failed', error_message = $2, updated_at = NOW()
+        WHERE id = $1
+        `,
+        [jobId, `Worker HTTP unreachable or timed out: ${detail}`],
+      );
+      return NextResponse.json(
+        {
+          message:
+            "Could not reach the conversion worker. Set WORKER_HTTP_URL (or WORKER_BASE_URL) to your Render URL; ensure the worker is Live and WORKER_CALLBACK_TOKEN matches on Vercel and Render.",
+          code: "WORKER_HTTP_UNREACHABLE",
+        },
+        { status: 503 },
+      );
+    }
+  }
 
   try {
-    await pushConversionJob({
-      job_id: jobId,
-      user_id: user.id,
-      input_file_key: body.inputFileKey,
-      output_prefix: `users/${user.id}/outputs`,
-      color_mode: colorMode,
-    });
+    await pushConversionJob(queuePayload);
   } catch (err) {
     const hint =
-      "Could not reach the job queue. From the project root run: docker compose up -d redis   " +
-      "and ensure REDIS_URL in frontend/.env.local is redis://127.0.0.1:6379/0";
+      "Could not reach the job queue. Set WORKER_HTTP_URL to your Render worker URL (recommended), or run Redis and set REDIS_URL. See DEPLOY.md.";
     const detail = err instanceof Error ? err.message : String(err);
     await db.query(
       `

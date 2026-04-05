@@ -1,7 +1,7 @@
 import asyncio
 import logging
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, Header, HTTPException
 
 from app.cleanup_scheduler import run_cleanup_scheduler
 from app.config import settings
@@ -44,6 +44,12 @@ def health() -> dict[str, str]:
     return {"status": "ok", "environment": settings.app_env}
 
 
+def _verify_worker_token(x_worker_token: str | None = Header(None, alias="x-worker-token")) -> None:
+    """Same secret as Vercel WORKER_CALLBACK_TOKEN — required for /convert/test (called by Next.js HTTP fallback)."""
+    if not x_worker_token or x_worker_token != settings.worker_callback_token:
+        raise HTTPException(status_code=401, detail="Invalid or missing x-worker-token")
+
+
 @app.post("/convert/test", response_model=ConversionResult)
-def convert_test(job: ConversionJob) -> ConversionResult:
+def convert_test(job: ConversionJob, _: None = Depends(_verify_worker_token)) -> ConversionResult:
     return process_conversion_job(job)
