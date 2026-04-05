@@ -16,6 +16,8 @@ Vercel can call your Render worker **directly** (no Upstash queue). Set **on Ver
 | **`WORKER_CALLBACK_TOKEN`** | **Same** as on Render |
 | **`S3_*`** | Same as Render (uploads + worker read/write) |
 
+**Where does `WORKER_HTTP_URL` come from?** It is **not** a variable that Render creates for you. It is the **public URL of your worker Web Service** — the same address you use in the browser for `/health`. Find it in the [Render dashboard](https://dashboard.render.com): open your **worker** service → copy the URL at the top (e.g. `https://fayda-worker-xxxx.onrender.com`). Paste that **only into Vercel** as `WORKER_HTTP_URL`. You do **not** add `WORKER_HTTP_URL` on Render.
+
 **Render** still needs the worker running (Docker, `worker/`), same **`S3_*`**, same token. **`REDIS_URL`** is optional for this path (Redis is only used by the old queue consumer).
 
 Redeploy **Vercel** after saving env vars.
