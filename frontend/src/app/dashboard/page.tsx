@@ -38,6 +38,8 @@ export default function DashboardPage() {
   const [previewBust, setPreviewBust] = useState(0);
   const [usage, setUsage] = useState<UsageInfo | null>(null);
   const [uploadConfig, setUploadConfig] = useState<UploadConfig | null>(null);
+  /** True while polling a job that stays "queued" — worker likely missing or misconfigured. */
+  const [queueStuckHint, setQueueStuckHint] = useState(false);
 
   const refresh = useCallback(async (opts?: { clearError?: boolean }) => {
     if (opts?.clearError !== false) setError(null);
@@ -98,6 +100,19 @@ export default function DashboardPage() {
     };
   }, [refresh]);
 
+  /** Pick up completed/failed jobs when the worker updates the DB (e.g. user refreshed mid-run). */
+  useEffect(() => {
+    const hasActive = jobs.some((j) => {
+      const s = j.status.toLowerCase();
+      return s === "queued" || s === "processing";
+    });
+    if (!hasActive) return;
+    const id = setInterval(() => {
+      void refresh({ clearError: false });
+    }, 5_000);
+    return () => clearInterval(id);
+  }, [jobs, refresh]);
+
   useEffect(() => {
     if (!pendingJobId) return;
 
@@ -118,6 +133,7 @@ export default function DashboardPage() {
       if (cancelled) return;
       setPendingJobId(null);
       setConverting(false);
+      setQueueStuckHint(false);
       await refresh();
       if (status === "completed") {
         setPreviewJob(job);
@@ -144,6 +160,7 @@ export default function DashboardPage() {
         if (!cancelled) {
           setPendingJobId(null);
           setConverting(false);
+          setQueueStuckHint(false);
           setError(t("dashboard.errJobTimedOut"));
         }
         return;
@@ -163,6 +180,9 @@ export default function DashboardPage() {
       if (job.status === "completed" || job.status === "failed") {
         await finish(job, job.status);
         return;
+      }
+      if (job.status === "queued" && elapsed > 20_000) {
+        if (!cancelled) setQueueStuckHint(true);
       }
       schedule(elapsed);
     }
@@ -189,6 +209,7 @@ export default function DashboardPage() {
 
   async function runConversion() {
     setError(null);
+    setQueueStuckHint(false);
     if (!selectedFile) {
       setError(mode === "pdf" ? t("dashboard.errNeedPdf") : t("dashboard.errNeedImage"));
       return;
@@ -412,6 +433,12 @@ export default function DashboardPage() {
 
           {error ? <p className="mt-3 text-sm text-red-300">{error}</p> : null}
 
+          {queueStuckHint && (converting || pendingJobId) ? (
+            <p className="mt-3 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm leading-relaxed text-amber-100">
+              {t("dashboard.queueStuckHint")}
+            </p>
+          ) : null}
+
           <p className="mt-4 flex items-start gap-2 rounded-lg bg-white/5 px-3 py-2 text-[11px] leading-relaxed text-zinc-400 sm:text-xs">
             <span aria-hidden>🔒</span>
             <span>
@@ -512,6 +539,11 @@ export default function DashboardPage() {
             {t("dashboard.viewHistory")}
           </a>
         </div>
+        {!loading && jobs.some((j) => j.status.toLowerCase() === "queued") ? (
+          <p className="mt-4 rounded-xl border border-amber-500/35 bg-amber-500/10 px-4 py-3 text-xs leading-relaxed text-amber-100 sm:text-sm">
+            {t("dashboard.queuedListHint")}
+          </p>
+        ) : null}
         {loading ? (
           <p className="mt-6 text-sm text-zinc-400">{t("dashboard.loading")}</p>
         ) : jobs.length === 0 ? (

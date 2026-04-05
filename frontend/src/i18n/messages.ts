@@ -71,7 +71,11 @@ export const messages: Record<Locale, Record<string, unknown>> = {
         "The browser could not upload to your file bucket (often a CORS issue). In Cloudflare R2: bucket → Settings → CORS — allow your Vercel URL, methods GET/PUT/HEAD, headers *. See DEPLOY.md.",
       errStart: "Could not start conversion.",
       errJobTimedOut:
-        "Conversion is taking too long. Ensure the worker is running and can reach this site (try http://127.0.0.1:3000 in worker FRONTEND_BASE_URL on Windows).",
+        "Conversion timed out. The site only queues jobs — a separate Python worker must run with the same REDIS_URL, FRONTEND_BASE_URL pointing at this site, and the same WORKER_CALLBACK_TOKEN as Vercel. Locally: docker compose up -d redis, then start the worker from worker/. See DEPLOY.md.",
+      queueStuckHint:
+        "Still queued — the background worker is probably not running or cannot call back to this site. Check REDIS_URL, deploy worker/ (Render etc.), FRONTEND_BASE_URL, and WORKER_CALLBACK_TOKEN.",
+      queuedListHint:
+        "“Queued” = waiting for the Python worker (not Next.js). Vercel cannot convert by itself: deploy worker/ with the same REDIS_URL. Local: docker compose up -d redis and run the worker — see DEPLOY.md in the repo.",
       errLoadJobs: "Failed to load jobs.",
     },
     jobCard: {
@@ -190,7 +194,12 @@ export const messages: Record<Locale, Record<string, unknown>> = {
       errDirectUploadFailed: "በቀጥታ መጫን ማስጀመር አልተቻለም። የስርዓት ቅንብር ይመልከቱ።",
       errDirectUploadCors: "ወደ ቦታ ማከማቻ መጫን ታግዷል (CORS)። R2 ውስጥ CORS ለ Vercel ድር ጣቢያዎ ያስቀምጡ።",
       errStart: "መቀየር ማስጀመር አልተቻለም።",
-      errJobTimedOut: "መቀየሪያው በጣም ረጅም ሆነ። ሰራተኛው እንደሚሰራ ያረጋግጡ።",
+      errJobTimedOut:
+        "ጊዜ አልፏል። ድህረ ገጹ ሥራውን በረድስ ይሰቅላል — የፓይቶን ሰራተኛ በተመሳሳይ REDIS_URL መሮጥ አለበት፣ FRONTEND_BASE_URL ወደዚህ ድር ጣቢያ፣ WORKER_CALLBACK_TOKEN ከ Vercel ጋር ተመሳሳይ። በኮምፒውተር፡ docker compose up -d redis እና worker/ ያስጀምሩ። DEPLOY.md ይመልከቱ።",
+      queueStuckHint:
+        "እስካሁን በተራ — የጀርባ ሰራተኛው ምናልባት አይሰራም ወይም ወደዚህ ድር ጣቢያ መደወል አይችልም። REDIS_URL፣ worker መጫን፣ FRONTEND_BASE_URL እና WORKER_CALLBACK_TOKEN ያረጋግጡ።",
+      queuedListHint:
+        "«የተሰራጨ» = የፓይቶን ሰራተኛውን በመጠባበቅ ላይ። Vercel ብቻውን አይቀይርም። ተመሳሳይ REDIS_URL ካለው worker/ ያራግፉ። በአካባቢ፡ docker compose up -d redis እና ሰራተኛውን ያስጀምሩ — በ repo ውስጥ DEPLOY.md።",
       errLoadJobs: "ሥራ መጫን አልተሳካም።",
     },
     jobCard: {
