@@ -267,6 +267,8 @@ See **`deployment/production-env.template.txt`** for a single list of variable n
 
 You do **not** need Vercel or Render on your machine for daily work. Use Docker Compose and `frontend/.env.local` + `worker/.env` per the project’s `.env.example` files.
 
+**Windows:** Start **`npm run dev`** (Next.js) **before** the worker. Prefer **`FRONTEND_BASE_URL=http://127.0.0.1:3000`** in `worker/.env` (the worker also rewrites `localhost` → `127.0.0.1` for callbacks to avoid IPv6/`::1` connection failures).
+
 ---
 
 ## End-to-end order (copy checklist)

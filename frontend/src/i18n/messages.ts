@@ -70,6 +70,8 @@ export const messages: Record<Locale, Record<string, unknown>> = {
       errDirectUploadCors:
         "The browser could not upload to your file bucket (often a CORS issue). In Cloudflare R2: bucket → Settings → CORS — allow your Vercel URL, methods GET/PUT/HEAD, headers *. See DEPLOY.md.",
       errStart: "Could not start conversion.",
+      errJobTimedOut:
+        "Conversion is taking too long. Ensure the worker is running and can reach this site (try http://127.0.0.1:3000 in worker FRONTEND_BASE_URL on Windows).",
       errLoadJobs: "Failed to load jobs.",
     },
     jobCard: {
@@ -188,6 +190,7 @@ export const messages: Record<Locale, Record<string, unknown>> = {
       errDirectUploadFailed: "በቀጥታ መጫን ማስጀመር አልተቻለም። የስርዓት ቅንብር ይመልከቱ።",
       errDirectUploadCors: "ወደ ቦታ ማከማቻ መጫን ታግዷል (CORS)። R2 ውስጥ CORS ለ Vercel ድር ጣቢያዎ ያስቀምጡ።",
       errStart: "መቀየር ማስጀመር አልተቻለም።",
+      errJobTimedOut: "መቀየሪያው በጣም ረጅም ሆነ። ሰራተኛው እንደሚሰራ ያረጋግጡ።",
       errLoadJobs: "ሥራ መጫን አልተሳካም።",
     },
     jobCard: {

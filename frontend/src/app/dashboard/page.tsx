@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { AppShell } from "@/components/app-shell";
 import { JobCard, type JobCardModel } from "@/components/job-card";
@@ -38,7 +38,6 @@ export default function DashboardPage() {
   const [previewBust, setPreviewBust] = useState(0);
   const [usage, setUsage] = useState<UsageInfo | null>(null);
   const [uploadConfig, setUploadConfig] = useState<UploadConfig | null>(null);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const refresh = useCallback(async (opts?: { clearError?: boolean }) => {
     if (opts?.clearError !== false) setError(null);
@@ -102,36 +101,79 @@ export default function DashboardPage() {
   useEffect(() => {
     if (!pendingJobId) return;
 
-    async function poll() {
-      const res = await fetch(`/api/jobs/${pendingJobId}`, { credentials: "include" });
-      if (!res.ok) return;
-      const data = (await res.json()) as { job?: Job };
-      const job = data.job;
-      if (!job) return;
+    const jobId = pendingJobId;
+    const startedAt = Date.now();
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
 
-      if (job.status === "completed" || job.status === "failed") {
-        if (pollRef.current) clearInterval(pollRef.current);
-        pollRef.current = null;
-        setPendingJobId(null);
-        setConverting(false);
-        await refresh();
-        if (job.status === "completed") {
-          setPreviewJob(job);
-          setPreviewBust((b) => b + 1);
-        }
-        if (job.status === "failed") {
-          setError(job.error_message ?? "Conversion failed.");
-        }
+    const clearTimer = () => {
+      if (timer != null) {
+        clearTimeout(timer);
+        timer = null;
+      }
+    };
+
+    async function finish(job: Job, status: "completed" | "failed") {
+      clearTimer();
+      if (cancelled) return;
+      setPendingJobId(null);
+      setConverting(false);
+      await refresh();
+      if (status === "completed") {
+        setPreviewJob(job);
+        setPreviewBust((b) => b + 1);
+      } else {
+        setError(job.error_message ?? "Conversion failed.");
       }
     }
 
-    pollRef.current = setInterval(poll, 300);
-    poll();
+    function schedule(elapsedMs: number) {
+      if (cancelled) return;
+      const delay =
+        elapsedMs < 2_500 ? 280 : elapsedMs < 12_000 ? 650 : 1_100;
+      clearTimer();
+      timer = setTimeout(() => void tick(), delay);
+    }
+
+    async function tick() {
+      if (cancelled) return;
+
+      const elapsed = Date.now() - startedAt;
+      if (elapsed > 180_000) {
+        clearTimer();
+        if (!cancelled) {
+          setPendingJobId(null);
+          setConverting(false);
+          setError(t("dashboard.errJobTimedOut"));
+        }
+        return;
+      }
+
+      const res = await fetch(`/api/jobs/${jobId}`, { credentials: "include" });
+      if (!res.ok) {
+        schedule(elapsed);
+        return;
+      }
+      const data = (await res.json()) as { job?: Job };
+      const job = data.job;
+      if (!job) {
+        schedule(elapsed);
+        return;
+      }
+      if (job.status === "completed" || job.status === "failed") {
+        await finish(job, job.status);
+        return;
+      }
+      schedule(elapsed);
+    }
+
+    void tick();
 
     return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
+      cancelled = true;
+      clearTimer();
     };
-  }, [pendingJobId, refresh]);
+  }, [pendingJobId, refresh, t]);
 
   function applyFile(file: File | null) {
     setSelectedFile(file);
