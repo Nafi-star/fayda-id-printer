@@ -65,7 +65,10 @@ export const messages: Record<Locale, Record<string, unknown>> = {
       errNeedImage: "Please choose a screenshot (PNG or JPG).",
       errGeneric: "Something went wrong. Try again.",
       errVercelUploadLimit:
-        "This site is hosted on Vercel, which limits each upload to about 4 MB. Use a smaller PDF, export a lower‑size file from Fayda, or try a screenshot under 4 MB.",
+        "This deployment cannot accept files over about 4 MB through the website upload (no object storage or legacy path). Add S3/R2 env vars on Vercel, set bucket CORS, redeploy — or use a smaller file.",
+      errDirectUploadFailed: "Could not start the direct upload. Check that object storage (S3) is configured on the server.",
+      errDirectUploadCors:
+        "The browser could not upload to your file bucket (often a CORS issue). In Cloudflare R2: bucket → Settings → CORS — allow your Vercel URL, methods GET/PUT/HEAD, headers *. See DEPLOY.md.",
       errStart: "Could not start conversion.",
       errLoadJobs: "Failed to load jobs.",
     },
@@ -181,7 +184,9 @@ export const messages: Record<Locale, Record<string, unknown>> = {
       errNeedImage: "እባክዎ ቅጽበታዊ (PNG/JPG) ይምረጡ።",
       errGeneric: "ስህተት። እንደገና ይሞክሩ።",
       errVercelUploadLimit:
-        "ይህ ጣቢያ በ Vercel ላይ ነው — እያንዳንዱ ጫኝ ወደ 4 ሜባ ይገደባል። ትንሽ PDF ይጠቀሙ ወይም ቅጽበታይ ይሞክሩ።",
+        "ይህ መጫኛ ከ 4 ሜባ በላይ ፋይሎችን አይቀበልም። S3/R2 ያዋቅሩ ወይም ትንሽ ፋይል ይጠቀሙ።",
+      errDirectUploadFailed: "በቀጥታ መጫን ማስጀመር አልተቻለም። የስርዓት ቅንብር ይመልከቱ።",
+      errDirectUploadCors: "ወደ ቦታ ማከማቻ መጫን ታግዷል (CORS)። R2 ውስጥ CORS ለ Vercel ድር ጣቢያዎ ያስቀምጡ።",
       errStart: "መቀየር ማስጀመር አልተቻለም።",
       errLoadJobs: "ሥራ መጫን አልተሳካም።",
     },

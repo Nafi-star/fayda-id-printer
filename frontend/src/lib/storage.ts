@@ -11,6 +11,7 @@ import {
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 type S3Env = {
   endpoint: string;
@@ -105,14 +106,39 @@ export async function ensureStorageDirs() {
   await mkdir(outputRoot, { recursive: true });
 }
 
-export async function saveUploadToInput(userId: string, originalName: string, bytes: Uint8Array) {
+/** True when `S3_*` env is set — production on Vercel should use browser → presigned PUT (no 4.5 MB limit). */
+export function isS3StorageEnabled(): boolean {
+  return Boolean(s3Env && s3);
+}
+
+export function buildInputObjectKey(userId: string, originalName: string): string {
   const safeName = originalName.replace(/[^a-zA-Z0-9._-]/g, "_");
-  const key = path.posix.join(
-    "users",
-    userId,
-    "uploads",
-    `${Date.now()}-${randomUUID()}-${safeName}`,
-  );
+  return path.posix.join("users", userId, "uploads", `${Date.now()}-${randomUUID()}-${safeName}`);
+}
+
+/** Presigned PUT so the browser uploads directly to R2/S3 — bypasses Vercel serverless body size limits. */
+export async function getPresignedPutForInputUpload(
+  userId: string,
+  originalName: string,
+  contentType: string,
+): Promise<{ uploadUrl: string; inputFileKey: string; contentType: string }> {
+  if (!s3Env || !s3) {
+    throw new Error("Object storage is not configured.");
+  }
+  await ensureBuckets();
+  const key = buildInputObjectKey(userId, originalName);
+  const ct = contentType.trim() || guessMimeFromName(originalName);
+  const command = new PutObjectCommand({
+    Bucket: s3Env.bucketInput,
+    Key: key,
+    ContentType: ct,
+  });
+  const uploadUrl = await getSignedUrl(s3, command, { expiresIn: 60 * 15 });
+  return { uploadUrl, inputFileKey: key, contentType: ct };
+}
+
+export async function saveUploadToInput(userId: string, originalName: string, bytes: Uint8Array) {
+  const key = buildInputObjectKey(userId, originalName);
 
   if (s3Env && s3) {
     await ensureBuckets();

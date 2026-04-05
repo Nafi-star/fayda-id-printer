@@ -46,6 +46,20 @@ Do these in any order; you need the values before Step 2 and Step 3.
 2. Project **Settings** → Storage → **S3**: generate keys, copy endpoint (e.g. `https://<ref>.storage.supabase.co/storage/v1/s3`).
 3. Set **`S3_FORCE_PATH_STYLE`** = **`true`** on both Vercel and Render.
 
+### 1.3.1 CORS (required for browser → bucket uploads)
+
+Production uploads go **straight to your bucket** with a presigned URL (so Vercel’s small serverless body limit does not apply). You must allow your **Vercel site origin** to **`PUT`** objects into the **input** bucket.
+
+**Cloudflare R2:** Open bucket **`fayda-input`** → **Settings** → **CORS policy** → add:
+
+- **Allowed origins:** `https://your-project.vercel.app` (your real URL; no trailing slash). For quick tests you can use `*`.
+- **Allowed methods:** `GET`, `PUT`, `HEAD`
+- **Allowed headers:** `*` (or include `Content-Type`)
+
+See [Cloudflare R2 CORS](https://developers.cloudflare.com/r2/buckets/cors/).
+
+**Supabase:** If browser uploads fail with a network/CORS error, add your Vercel origin in the project’s Storage / API CORS settings (or use the dashboard docs for S3-compatible access).
+
 ### 1.4 Resend (email)
 
 1. [resend.com](https://resend.com) → **API Keys** → create key → **`RESEND_API_KEY`**.
@@ -127,9 +141,9 @@ Add **each** name exactly as below. Use **your** real values where noted.
 3. Go back to **Settings → Environment Variables** → set **`APP_URL`** to that **exact** URL (https, no trailing slash) → **Save**.
 4. **Deployments** → **⋯** on the latest production deployment → **Redeploy**.
 
-### 2.5 Vercel upload limit (important)
+### 2.5 Large files on Vercel
 
-Vercel serverless routes accept request bodies only up to about **4.5 MB**. The dashboard enforces a safe limit for production builds. Large PDFs that work on your PC may fail on Vercel — use a **smaller PDF** or a **screenshot under ~4 MB**. See [Vercel function limits](https://vercel.com/docs/functions/limitations).
+With **`S3_*`** set on Vercel, uploads use **presigned PUT** to your bucket (not through the Next.js body), so **full-size Fayda PDFs work** after **CORS** is configured on the input bucket (**§1.3.1**). Without object storage, only small files can use the legacy multipart route (~4.5 MB) — see [Vercel function limits](https://vercel.com/docs/functions/limitations).
 
 ---
 
@@ -181,7 +195,7 @@ In Render → **Logs**: you should see the consumer starting and a line like `ca
 ## Step 4 — Smoke test
 
 1. Open your **Vercel URL** → register or log in.
-2. Upload a **small** PDF or image (under ~4 MB on Vercel) → **Convert**.
+2. Upload a Fayda PDF or image → **Convert** (with S3 + CORS, large PDFs are OK).
 3. If the job stays **Queued** forever: worker asleep (wait or upgrade), wrong **`REDIS_URL`**, or worker not running — check **Render Logs**.
 4. If the job **fails** with auth: **`WORKER_CALLBACK_TOKEN`** mismatch or wrong **`FRONTEND_BASE_URL`**.
 5. **Forgot password** → confirm email link uses your real domain (depends on **`APP_URL`** + Resend).
@@ -192,7 +206,8 @@ In Render → **Logs**: you should see the consumer starting and a line like `ca
 
 | Problem | Fix |
 |---------|-----|
-| “Something went wrong” / upload fails | File too large for Vercel (~4 MB safe). Use a smaller file. |
+| Upload fails with a **CORS** / network error | Set **CORS** on **`fayda-input`** for your Vercel URL (**§1.3.1**). |
+| Upload fails only without S3 | Add all **`S3_*`** env vars on Vercel, or use files under ~4 MB. |
 | Convert stuck on **Queued** | Render sleeping, or **`REDIS_URL`** wrong on worker, or worker crashed — **Logs**. |
 | Job fails / 401 in logs | **`WORKER_CALLBACK_TOKEN`** must match; **`FRONTEND_BASE_URL`** must match Vercel exactly. |
 | Upload works, worker errors on S3 | **`S3_*`** identical on Vercel and Render; buckets exist; **`S3_FORCE_PATH_STYLE`** correct for R2 vs Supabase. |

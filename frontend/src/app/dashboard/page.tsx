@@ -17,6 +17,8 @@ type UsageInfo = {
   isUnlimited: boolean;
 };
 
+type UploadConfig = { directUpload: boolean; maxMultipartBytes: number };
+
 export default function DashboardPage() {
   const router = useRouter();
   const { t, locale } = useI18n();
@@ -35,6 +37,7 @@ export default function DashboardPage() {
   const [previewJob, setPreviewJob] = useState<Job | null>(null);
   const [previewBust, setPreviewBust] = useState(0);
   const [usage, setUsage] = useState<UsageInfo | null>(null);
+  const [uploadConfig, setUploadConfig] = useState<UploadConfig | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const refresh = useCallback(async (opts?: { clearError?: boolean }) => {
@@ -64,6 +67,22 @@ export default function DashboardPage() {
 
   useEffect(() => {
     setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    void fetch("/api/uploads/config", { credentials: "include" })
+      .then((r) => r.json())
+      .then((d: unknown) => {
+        const o = d as { directUpload?: boolean; maxMultipartBytes?: number };
+        setUploadConfig({
+          directUpload: Boolean(o.directUpload),
+          maxMultipartBytes:
+            typeof o.maxMultipartBytes === "number" ? o.maxMultipartBytes : 25 * 1024 * 1024,
+        });
+      })
+      .catch(() =>
+        setUploadConfig({ directUpload: false, maxMultipartBytes: 25 * 1024 * 1024 }),
+      );
   }, []);
 
   useEffect(() => {
@@ -133,9 +152,8 @@ export default function DashboardPage() {
       return;
     }
 
-    // Vercel serverless routes reject bodies over ~4.5 MB before our API runs — avoid opaque "Something went wrong."
-    const vercelMax = 4 * 1024 * 1024;
-    if (process.env.NEXT_PUBLIC_VERCEL === "1" && selectedFile.size > vercelMax) {
+    const maxMultipart = uploadConfig?.maxMultipartBytes ?? 25 * 1024 * 1024;
+    if (!uploadConfig?.directUpload && selectedFile.size > maxMultipart) {
       setError(t("dashboard.errVercelUploadLimit"));
       return;
     }
@@ -143,18 +161,56 @@ export default function DashboardPage() {
     setConverting(true);
     setPreviewJob(null);
     try {
-      const formData = new FormData();
-      formData.append("file", selectedFile);
-      const uploadRes = await fetch("/api/uploads", {
-        method: "POST",
-        credentials: "include",
-        body: formData,
-      });
-      const uploadData = (await uploadRes.json()) as { inputFileKey?: string; message?: string };
-      if (!uploadRes.ok || !uploadData.inputFileKey) {
-        setError(uploadData.message ?? "Upload failed.");
-        setConverting(false);
-        return;
+      let inputFileKey: string;
+
+      if (uploadConfig?.directUpload) {
+        const presRes = await fetch("/api/uploads/presign", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            fileName: selectedFile.name,
+            contentType: selectedFile.type || "application/octet-stream",
+            fileSize: selectedFile.size,
+          }),
+        });
+        const presData = (await presRes.json()) as {
+          uploadUrl?: string;
+          inputFileKey?: string;
+          contentType?: string;
+          message?: string;
+        };
+        if (!presRes.ok || !presData.uploadUrl || !presData.inputFileKey) {
+          setError(presData.message ?? t("dashboard.errDirectUploadFailed"));
+          setConverting(false);
+          return;
+        }
+        const putRes = await fetch(presData.uploadUrl, {
+          method: "PUT",
+          body: selectedFile,
+          headers: { "Content-Type": presData.contentType ?? "application/octet-stream" },
+        });
+        if (!putRes.ok) {
+          setError(t("dashboard.errDirectUploadCors"));
+          setConverting(false);
+          return;
+        }
+        inputFileKey = presData.inputFileKey;
+      } else {
+        const formData = new FormData();
+        formData.append("file", selectedFile);
+        const uploadRes = await fetch("/api/uploads", {
+          method: "POST",
+          credentials: "include",
+          body: formData,
+        });
+        const uploadData = (await uploadRes.json()) as { inputFileKey?: string; message?: string };
+        if (!uploadRes.ok || !uploadData.inputFileKey) {
+          setError(uploadData.message ?? "Upload failed.");
+          setConverting(false);
+          return;
+        }
+        inputFileKey = uploadData.inputFileKey;
       }
 
       const jobRes = await fetch("/api/jobs", {
@@ -162,7 +218,7 @@ export default function DashboardPage() {
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          inputFileKey: uploadData.inputFileKey,
+          inputFileKey,
           colorMode,
         }),
       });
