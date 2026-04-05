@@ -1,467 +1,210 @@
-# First-time deployment guide (clear & detailed)
+# Deploy: Vercel (frontend) + Render (worker)
 
-Read **“Big picture”** once. Then use **either** the path below for **“Vercel already deployed”** (most people finishing production) **or** the **full checklist** if you are starting from zero.
-
----
-
-## Frontend already on Vercel — what to do next (your path)
-
-Assume **Next.js is live** on Vercel (**Root Directory** should be **`frontend`**). The site can load and still be **incomplete** until the backing services and worker match this guide.
-
-Do these **in order**:
-
-| # | What you do |
-|---|-------------|
-| **1** | **Cloud services (Part A):** If you have not already, create **Neon**, **Upstash Redis**, **R2 or Supabase Storage**, and **Resend** (or SMTP). You need working **`DATABASE_URL`**, **`REDIS_URL`**, all **`S3_*`**, and email vars. |
-| **2** | **Sync Vercel env (Part B3):** In **Vercel → your project → Settings → Environment Variables**, confirm **every** variable in **B3** is set for **Production** (and Preview if you use it). Pay special attention to **`APP_URL`** = your real site URL (https, **no** trailing slash) — then **Redeploy** after changes. |
-| **3** | **One shared secret:** **`WORKER_CALLBACK_TOKEN`** must be the **same** on Vercel and on the worker. If the worker is not deployed yet, generate a long random string now, set it on Vercel, redeploy, then use the same value in Part C. |
-| **4** | **Deploy the worker (Part C):** On **Railway**, **Render**, or **Fly**, deploy from the **`worker/`** folder (Dockerfile). Set **`FRONTEND_BASE_URL`** to your **exact** Vercel production URL. Copy **`REDIS_URL`**, **`S3_*`**, and **`WORKER_CALLBACK_TOKEN`** from Vercel. |
-| **5** | **Optional on Vercel:** After the worker has a URL, add **`WORKER_BASE_URL`** = worker’s `https://…` (helps **`/api/worker/health`**; conversions can work without it). **Redeploy** Vercel. |
-| **6** | **Git in sync:** Push code changes to the **same GitHub repo** Vercel is connected to so production stays up to date (**Part B1**). |
-| **7** | **Test (Part D):** Register, **Convert** a PDF, **Forgot password**. If **Convert** hangs, the worker or Redis/S3/token/URL mismatch is almost always the cause — see **“If something fails”** at the end. |
+This guide deploys **Next.js** on [Vercel](https://vercel.com) and the **Python worker** on [Render](https://render.com). Follow the steps **in order**. Do **not** commit `.env` files — paste secrets only in Vercel and Render dashboards.
 
 ---
 
-## Full checklist (starting from zero)
+## What you are building
 
-Use this if you have **not** put the site on Vercel yet.
-
-| Step | Section | What you do |
-|------|---------|-------------|
-| 1 | **Part A** | Create **Neon**, **Upstash**, **R2 or Supabase**, **Resend**. Copy values for Vercel + worker. |
-| 2 | **Part B** | GitHub → Vercel import, **Root Directory = `frontend`**, **B3** env vars, deploy, fix **`APP_URL`**, redeploy. |
-| 3 | **`WORKER_CALLBACK_TOKEN`** | Same value on Vercel and worker (see Part C). |
-| 4 | **Part C** | Deploy worker (**Railway** / **Render** / **Fly**). |
-| 5 | **Optional** | **`WORKER_BASE_URL`** on Vercel. |
-| 6 | **Part D** | End-to-end tests. |
-
-**If Convert spins forever:** the worker is not running, cannot reach Redis, or **`WORKER_CALLBACK_TOKEN`** / **`FRONTEND_BASE_URL`** do not match Vercel. Use your host’s **logs** (see Part C) and the table at the end of this file.
-
-**Payment methods:** Some providers (including **Fly.io**, **Railway**, **Render**, **Cloudflare**) ask for a **card on file** even when you stay on a free tier. If one host insists on billing you do not want, try another option in Part C or a small **VPS** where you run Docker yourself.
+| Piece | Where | Role |
+|--------|--------|------|
+| Website & APIs | **Vercel** (`frontend/`) | Pages, auth, upload API, jobs |
+| Database | **Neon** | Postgres (`DATABASE_URL`) |
+| Job queue | **Upstash** | Redis (`REDIS_URL`) — must be **identical** on Vercel and Render |
+| Files (PDF/PNG) | **Cloudflare R2** or **Supabase Storage** | S3-compatible (`S3_*` vars) — **identical** on Vercel and Render |
+| PDF → image | **Render** (`worker/`) | Consumes Redis, writes results, calls your Vercel API |
+| Email | **Resend** (or SMTP) | Password reset (`RESEND_API_KEY`, `EMAIL_FROM`) |
 
 ---
 
-## Big picture — why you need more than one website
+## Step 1 — Supporting services (one-time)
 
-Your app is **not** a single program. On your computer you run:
+Do these in any order; you need the values before Step 2 and Step 3.
 
-1. **Next.js** (the website people see)  
-2. **PostgreSQL** (database: users, logins, jobs)  
-3. **Redis** (a short waiting line for “convert this PDF” jobs)  
-4. **A Python worker** (actually reads the PDF, makes the PNG)  
-5. **Disk or cloud storage** (where the PDF and PNG files live)
+### 1.1 Neon (database)
 
-On **Vercel**, you only host the **Next.js** part. Vercel does **not** run the Python worker and does **not** share a folder with that worker. So in production you:
+1. [neon.tech](https://neon.tech) → sign up → **Create project**.
+2. Copy the **connection string** (URI). This is **`DATABASE_URL`** (`sslmode=require` is fine).
 
-| Piece | Where it usually lives | What it’s for |
-|--------|-------------------------|---------------|
-| Website (Next.js) | **Vercel** | Pages, login, upload API, admin |
-| Database | **Neon** (or similar) | Same as local Postgres |
-| Queue | **Upstash Redis** | Same as local Redis |
-| Files (PDF/PNG) | **Cloudflare R2** or **Supabase Storage** (S3 API) | Same idea as local `storage/` or MinIO |
-| PDF → image worker | **Railway**, **Render**, or **Fly.io** (see Part C) | Must stay **running** to drain the Redis queue (avoid “sleeping” free tiers for the worker if jobs stall) |
-| “Forgot password” emails | **Resend** (or Gmail SMTP) | Sends the reset link |
+### 1.2 Upstash (Redis)
 
-**If the worker is missing or misconfigured:** the site may load, but **Convert** spins forever — because nothing is taking jobs from Redis.
+1. [upstash.com](https://upstash.com) → **Create database** → **Redis**.
+2. Copy the **Redis URL** starting with **`rediss://`**. This is **`REDIS_URL`**.
 
-**If R2/S3 is missing or wrong:** upload or download can fail — Vercel and the worker must use the **same** bucket settings.
+### 1.3 Object storage (pick **one**)
 
----
+**Option A — Cloudflare R2**
 
-## Before you start — what you need
+1. [dash.cloudflare.com](https://dash.cloudflare.com) → **R2** → create buckets **`fayda-input`** and **`fayda-output`**.
+2. Create **R2 API token** with read/write → note **Access Key ID**, **Secret**, **Account ID**.
+3. Endpoint: `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`  
+4. Set **`S3_FORCE_PATH_STYLE`** = **`false`** on both Vercel and Render.
 
-1. **This project** on **GitHub** (or the same Git host Vercel uses) — **required** so Vercel can build; keep pushing **`main`** (or your production branch) after changes.  
-2. Accounts: **Vercel** (already done if the frontend is live), **Neon**, **Upstash**, **either** Cloudflare (R2) **or** Supabase (Storage), **Resend** (or SMTP), and **one** worker host from Part C (**Railway**, **Render**, or **Fly.io**).  
-3. **Time:** ~15–20 min if Vercel is already deployed and you only add services + worker; longer if you start from scratch.  
-4. **Fly.io only:** install the **Fly CLI** on your PC if you choose Fly: [Install flyctl](https://fly.io/docs/hands-on/install-flyctl/). Railway and Render use their websites (CLI optional).
+**Option B — Supabase Storage (S3 API)**
 
-**Environment variables:** these are **secret settings** the server reads (like your `.env.local` locally). You paste them into **Vercel → Project → Settings → Environment Variables** and into your worker service using that platform’s **Variables / Secrets** UI (or `fly secrets set` on Fly).
+1. [supabase.com](https://supabase.com) → project → **Storage** → create buckets **`fayda-input`**, **`fayda-output`**.
+2. Project **Settings** → Storage → **S3**: generate keys, copy endpoint (e.g. `https://<ref>.storage.supabase.co/storage/v1/s3`).
+3. Set **`S3_FORCE_PATH_STYLE`** = **`true`** on both Vercel and Render.
 
-**`WORKER_CALLBACK_TOKEN`:** one long random password **you invent** (e.g. 40+ letters/numbers). It must be **exactly the same** on Vercel and on the worker. The worker proves to your website “it’s really me” when a job finishes.
+### 1.4 Resend (email)
 
----
+1. [resend.com](https://resend.com) → **API Keys** → create key → **`RESEND_API_KEY`**.
+2. Add/verify a domain → **`EMAIL_FROM`** = e.g. `Fayda <noreply@yourdomain.com>`.
 
-# Part A — Create the cloud services (do in order)
+### 1.5 Shared secret (write it down once)
 
-## A1. Neon — PostgreSQL database
+Generate a long random string (PowerShell):
 
-1. Open [https://neon.tech](https://neon.tech) and sign up.  
-2. **Create project** → choose a region close to you → create.  
-3. Find **Connection string** (URI). It looks like:  
-   `postgresql://user:pass@ep-something.region.aws.neon.tech/neondb?sslmode=require`  
-4. **Copy the whole string.** This is **`DATABASE_URL`**.  
-   - Keep it secret. Never commit it to Git.
+```powershell
+[guid]::NewGuid().ToString() + [guid]::NewGuid().ToString()
+```
+
+This is **`WORKER_CALLBACK_TOKEN`**. You will paste the **same** value on **Vercel** and **Render** — no spaces, no quotes in the dashboard fields.
 
 ---
 
-## A2. Upstash — Redis (job queue)
+## Step 2 — Vercel (Next.js)
 
-1. Open [https://upstash.com](https://upstash.com) and sign up.  
-2. **Create database** → type **Redis** → pick a region (often same as Neon).  
-3. After creation, open the database → copy the **REST URL** is not what we need; copy the **Redis URL** that starts with **`rediss://`** (TLS).  
-4. That full URL is **`REDIS_URL`**.  
-5. Use the **same** URL later on Vercel **and** on the worker.
+### 2.1 Repository
 
----
+- Push this repo to **GitHub** (if it is not already).
+- In [vercel.com](https://vercel.com) → **Add New → Project** → **Import** the repository.
 
-## A3. File storage (PDFs and PNGs) — pick **one**
+### 2.2 Build settings
 
-Both options use the **same S3-style variables** in this app (`S3_ENDPOINT`, keys, buckets). Vercel and the **worker** must use **identical** values.
+- **Root Directory:** **`frontend`** (click **Edit**, set to `frontend`, not the repo root).
+- Framework: **Next.js** (auto).
 
-### Choose Supabase Storage if…
+### 2.3 Environment variables (Production)
 
-You want to avoid Cloudflare / a card on file, and you are OK with the **free tier** (about **1 GB** total file storage and per-file limits — check [Supabase Storage limits](https://supabase.com/docs/guides/storage/uploads/file-limits)). Fine for starting out; upgrade when you sell at volume.
+Add **each** name exactly as below. Use **your** real values where noted.
 
-### Choose Cloudflare R2 if…
-
-You want a larger **free storage allowance** (10 GB-month on Standard) and are OK creating a Cloudflare account (they may ask for a payment method even on the free tier).
-
----
-
-### A3a. Supabase Storage (S3-compatible API)
-
-1. Sign up at [https://supabase.com](https://supabase.com) → **New project** (you can use Supabase **only** for Storage; your app can keep **Neon** for `DATABASE_URL`).  
-2. Wait until the project is ready. In the left sidebar open **Storage**.  
-3. **New bucket** → name **`fayda-input`** → create (default **private** is OK).  
-4. **New bucket** → name **`fayda-output`** → create.  
-5. Open **Project Settings** (gear) → **Storage** (or **Storage → S3 connection** depending on UI). Find the **S3** section:  
-   - **Endpoint** — use the **storage** hostname, not the main API URL. It looks like:  
-     `https://<project-ref>.storage.supabase.co/storage/v1/s3`  
-     ([Supabase S3 auth docs](https://supabase.com/docs/guides/storage/s3/authentication))  
-   - **Region** — copy the value shown (e.g. `us-east-1`).  
-6. **Generate new S3 access keys** (Access Key ID + Secret Access Key). Copy both once; the secret is shown only at creation.
-
-Set these everywhere (Vercel + worker):
+**Core**
 
 | Name | Value |
 |------|--------|
-| `S3_ENDPOINT` | `https://<project-ref>.storage.supabase.co/storage/v1/s3` |
-| `S3_REGION` | Your project region from the dashboard |
-| `S3_ACCESS_KEY` | Supabase S3 access key id |
-| `S3_SECRET_KEY` | Supabase S3 secret |
+| `DATABASE_URL` | Neon connection string |
+| `REDIS_URL` | Upstash `rediss://...` |
+| `WORKER_CALLBACK_TOKEN` | Same string as in Step 1.5 |
+
+**URLs**
+
+| Name | Value |
+|------|--------|
+| `APP_URL` | After first deploy, set to your **exact** site URL: `https://<project>.vercel.app` — **no trailing slash**. Redeploy after changing. |
+
+**Object storage (same block you chose in 1.3)**
+
+| Name | Value |
+|------|--------|
+| `S3_ENDPOINT` | R2 or Supabase endpoint |
+| `S3_REGION` | e.g. `auto` (R2) or region from Supabase |
+| `S3_ACCESS_KEY` | From R2 or Supabase S3 keys |
+| `S3_SECRET_KEY` | Secret |
 | `S3_BUCKET_INPUT` | `fayda-input` |
 | `S3_BUCKET_OUTPUT` | `fayda-output` |
-| `S3_FORCE_PATH_STYLE` | **`true`** (required for Supabase S3) |
-
-The app may try to auto-create buckets; on Supabase you already created them manually — that is fine.
-
----
-
-### A3b. Cloudflare R2
-
-Think of R2 as a hard drive in the cloud that both Vercel and the worker can access using the same login.
-
-1. Sign in at [https://dash.cloudflare.com](https://dash.cloudflare.com).  
-2. Go to **R2** in the sidebar.  
-3. **Create bucket** → name **`fayda-input`**.  
-4. **Create bucket** → name **`fayda-output`**.  
-5. Note **Account ID** and S3 API **endpoint**:  
-   `https://<YOUR_ACCOUNT_ID>.r2.cloudflarestorage.com`  
-6. **Manage R2 API Tokens** → **Create API token** → read/write on those buckets → copy **Access Key ID** and **Secret Access Key**.
-
-| Name | Typical value |
-|------|----------------|
-| `S3_ENDPOINT` | `https://<ACCOUNT_ID>.r2.cloudflarestorage.com` |
-| `S3_REGION` | `auto` |
-| `S3_ACCESS_KEY` | (from token) |
-| `S3_SECRET_KEY` | (from token) |
-| `S3_BUCKET_INPUT` | `fayda-input` |
-| `S3_BUCKET_OUTPUT` | `fayda-output` |
-| `S3_FORCE_PATH_STYLE` | `false` |
-
----
-
-## A4. Resend — password reset emails
-
-1. Sign up at [https://resend.com](https://resend.com).  
-2. **API Keys** → create a key → copy it → this is **`RESEND_API_KEY`**.  
-3. **Domains** → add and verify your domain (DNS records they give you).  
-4. **`EMAIL_FROM`** must use that domain, e.g. `Fayda ID <noreply@yourdomain.com>`.  
-   - Until the domain is verified, Resend may only allow test sending; follow their docs.
-
-*(Alternative: Gmail + app password — see `frontend/.env.local.example`.)*
-
----
-
-# Part B — Vercel (new deploy or update existing)
-
-If the frontend is **already** on Vercel, skip **B2** and go straight to **B3**: open **Settings → Environment Variables**, verify every variable, set **`APP_URL`** to your live URL, then **Deployments → … → Redeploy** production. Push new commits via **B1** when you change the app code.
-
-## B1. Put code on GitHub (full steps)
-
-### If you already cloned from GitHub
-
-Your PC folder is linked to a remote called **`origin`**. From the **repository root** (the folder that contains `frontend/` and `worker/`):
-
-```powershell
-cd C:\Users\hp\Documents\fayda-id-printer
-git status
-git add -A
-git commit -m "Describe your changes, e.g. deployment docs and admin features"
-git push origin main
-```
-
-- If Git asks you to log in, use **GitHub → Settings → Developer settings → Personal access tokens** and sign in with the token when prompted (HTTPS), or install [GitHub CLI](https://cli.github.com/) and run `gh auth login`.  
-- Never commit secrets: **`frontend/.env.local`** and **`worker/.env`** are listed in `.gitignore`.
-
-### If this folder is not on GitHub yet
-
-1. Open [https://github.com/new](https://github.com/new).  
-2. Repository name: e.g. `fayda-id-printer` → **Create repository** (no README if you already have code locally).  
-3. In PowerShell, from your project folder:
-
-```powershell
-cd C:\path\to\fayda-id-printer
-git init
-git branch -M main
-git add -A
-git commit -m "Initial commit"
-git remote add origin https://github.com/YOUR_USERNAME/YOUR_REPO.git
-git push -u origin main
-```
-
-Replace `YOUR_USERNAME` / `YOUR_REPO` with your GitHub username and repo name. Use the URL GitHub shows after you create the empty repo.
-
-## B2. Create the Vercel project (skip if the project already exists)
-
-1. Go to [https://vercel.com](https://vercel.com) → sign up (often “Continue with GitHub”).  
-2. **Add New… → Project** → **Import** your repository.  
-3. **Important — Root Directory:** click **Edit** → set to **`frontend`** (not the repo root).  
-4. Framework should auto-detect **Next.js**.  
-5. Expand **Environment Variables** and add **each** row from **B3** (or add them later under **Settings → Environment Variables** and redeploy).
-
-### B3. Environment variables on Vercel (copy names exactly)
-
-**If the site is already deployed:** use this as a **checklist**. Missing **`REDIS_URL`**, **`S3_*`**, or a wrong **`APP_URL`** is a common reason uploads, login, or **Convert** fail. After any change here, trigger a **production redeploy**.
-
-**Database & queue**
-
-- `DATABASE_URL` → paste Neon connection string  
-- `REDIS_URL` → paste Upstash `rediss://...`  
-
-**Security (same value you will set on the worker in Part C)**
-
-- `WORKER_CALLBACK_TOKEN` → e.g. open PowerShell and run:  
-  `[guid]::NewGuid().ToString() + [guid]::NewGuid().ToString()`  
-  or any long random string — **copy it somewhere safe**
-
-**Admin & URLs**
-
-- `ADMIN_EMAIL` → optional extra admin (comma-separated list in **`ADMIN_EMAILS`** if you need several). Addresses in **`frontend/src/lib/admin-config.ts`** (`ADMIN_EMAILS_FROM_CONFIG`) are **always** admins too — use the same email you will register.  
-- `APP_URL` → for the **first** deploy, use a placeholder like `https://placeholder.vercel.app` — **after** the first successful deploy, Vercel shows your real URL (e.g. `https://fayda-xxx.vercel.app`). Then go back to **Settings → Environment Variables**, set **`APP_URL`** to that **exact** URL (https, **no** trailing slash), save, and **Redeploy** so password reset links are correct.
-
-**Object storage (S3-compatible — same set for R2 or Supabase)**
-
-- `S3_ENDPOINT` — R2: `https://…r2.cloudflarestorage.com` · Supabase: `https://<ref>.storage.supabase.co/storage/v1/s3`  
-- `S3_REGION` — R2: `auto` · Supabase: copy from project Storage / S3 settings  
-- `S3_ACCESS_KEY`  
-- `S3_SECRET_KEY`  
-- `S3_BUCKET_INPUT` → `fayda-input`  
-- `S3_BUCKET_OUTPUT` → `fayda-output`  
-- `S3_FORCE_PATH_STYLE` → **`true`** for Supabase · **`false`** for R2  
+| `S3_FORCE_PATH_STYLE` | `false` (R2) or `true` (Supabase) |
 
 **Email**
 
-- `RESEND_API_KEY`  
-- `EMAIL_FROM` → e.g. `Fayda <noreply@yourdomain.com>`  
+| Name | Value |
+|------|--------|
+| `RESEND_API_KEY` | From Resend |
+| `EMAIL_FROM` | Verified sender, e.g. `Fayda <noreply@yourdomain.com>` |
 
 **Optional**
 
-- `DISABLE_ADMIN_APPROVAL` → only set to `true` if you want everyone to log in without admin approval (not recommended for selling access).
+| Name | Value |
+|------|--------|
+| `ADMIN_EMAIL` or `ADMIN_EMAILS` | Extra admin emails (comma-separated). Admins in `frontend/src/lib/admin-config.ts` always count. |
+| `WORKER_BASE_URL` | After Render is live: `https://<your-service>.onrender.com` (no trailing slash) — helps `/api/worker/health`. |
+| `DISABLE_ADMIN_APPROVAL` | `true` only if you want open sign-up without `/admin` approval. |
 
-**After the worker has a public URL (Part C):** optionally add **`WORKER_BASE_URL`** → `https://your-worker-host...` (no trailing slash) so the site can probe **`/health`** on the worker. Conversions still work via Redis if you skip this.
+### 2.4 Deploy
 
-**New Vercel project only:** click **Deploy**, wait for it to finish, then set **`APP_URL`** to the real URL Vercel shows and **redeploy** if you used a placeholder first.
+1. Click **Deploy**.
+2. When the build finishes, open the **production URL** Vercel shows.
+3. Go back to **Settings → Environment Variables** → set **`APP_URL`** to that **exact** URL (https, no trailing slash) → **Save**.
+4. **Deployments** → **⋯** on the latest production deployment → **Redeploy**.
 
-**Existing Vercel project:** **Deployments** tab → open the latest production deployment menu → **Redeploy** whenever you change environment variables or want to pick up the latest Git commit.
+### 2.5 Vercel upload limit (important)
 
----
-
-# Part C — Deploy the Python worker (Railway, Render, or Fly.io)
-
-The worker is a **Docker** app in the **`worker/`** folder (`worker/Dockerfile`). It must:
-
-- Connect to **the same** **`REDIS_URL`** as Vercel (Upstash).  
-- Use **the same** **`S3_*`** values as Vercel.  
-- Call your Next.js app at **`FRONTEND_BASE_URL`** (your real Vercel URL, **no** trailing slash) with header **`x-worker-token`** = **`WORKER_CALLBACK_TOKEN`** (same string as on Vercel).
-
-**`PORT`:** Render and Railway set **`PORT`** automatically. The Dockerfile already uses **`${PORT:-8001}`** — no extra config needed.
-
-Pick **one** host below.
+Vercel serverless routes accept request bodies only up to about **4.5 MB**. The dashboard enforces a safe limit for production builds. Large PDFs that work on your PC may fail on Vercel — use a **smaller PDF** or a **screenshot under ~4 MB**. See [Vercel function limits](https://vercel.com/docs/functions/limitations).
 
 ---
 
-## C0 — Worker environment variables (every platform)
+## Step 3 — Render (worker)
 
-Add these in the worker service’s **Environment / Variables** UI (or Fly secrets). Names must match exactly.
+### 3.1 Create the web service
 
-| Variable | Value |
-|----------|--------|
-| `REDIS_URL` | Same Upstash URL as on Vercel (`rediss://…`) |
-| `FRONTEND_BASE_URL` | `https://your-project.vercel.app` (exact production URL, no `/` at end) |
-| `WORKER_CALLBACK_TOKEN` | Same long random string as on Vercel |
-| `S3_ENDPOINT` | Same as Vercel |
-| `S3_REGION` | Same as Vercel |
-| `S3_ACCESS_KEY` | Same as Vercel |
-| `S3_SECRET_KEY` | Same as Vercel |
+1. [dashboard.render.com](https://dashboard.render.com) → **New +** → **Web Service**.
+2. **Connect** your **same GitHub repository**.
+3. **Name:** e.g. `fayda-worker`.
+4. **Region:** choose one close to Neon/Upstash if possible.
+5. **Root Directory:** **`worker`**
+6. **Runtime:** **Docker** (Render should detect `worker/Dockerfile`).
+7. **Instance type:** Free tier can **sleep** when idle; first job after sleep may be slow. For reliable queue processing, use a **paid** instance that does not spin down.
+8. **Health check path:** `/health` (optional but recommended).
+
+### 3.2 Environment variables (Render)
+
+Open **Environment** for this service and add:
+
+| Name | Value |
+|------|--------|
+| `REDIS_URL` | **Same** as Vercel (`rediss://...`) |
+| `FRONTEND_BASE_URL` | **Exact** Vercel production URL, e.g. `https://your-project.vercel.app` — **no trailing slash** |
+| `WORKER_CALLBACK_TOKEN` | **Same** as Vercel |
+| `S3_ENDPOINT` | **Same** as Vercel |
+| `S3_REGION` | **Same** as Vercel |
+| `S3_ACCESS_KEY` | **Same** as Vercel |
+| `S3_SECRET_KEY` | **Same** as Vercel |
 | `S3_BUCKET_INPUT` | `fayda-input` |
 | `S3_BUCKET_OUTPUT` | `fayda-output` |
-| `S3_FORCE_PATH_STYLE` | `true` (Supabase) or `false` (R2) — same as Vercel |
+| `S3_FORCE_PATH_STYLE` | **Same** as Vercel (`true` or `false`) |
 
-Optional: `LOG_LEVEL=INFO` — fine to omit.
+Do **not** rely on a `.env` file inside the image for production — Render injects these at runtime.
 
-After deploy, open **`https://<your-worker-host>/health`** in a browser; you should see JSON like `{"status":"ok",...}`.
+### 3.3 Deploy and verify
 
----
+1. **Create Web Service** and wait until the deploy succeeds.
+2. Open **`https://<your-service>.onrender.com/health`** in a browser — you should see JSON like `{"status":"ok",...}`.
+3. Copy the service **URL** (no trailing slash).
+4. On **Vercel**, add **`WORKER_BASE_URL`** = that URL → **Redeploy** the frontend (optional but useful for health checks).
 
-## C1 — Railway (no Fly CLI required)
+### 3.4 Logs
 
-1. Sign up at [railway.app](https://railway.app) (often “Login with GitHub”).  
-2. **New project** → **Deploy from GitHub repo** → select this repository.  
-3. Railway may create a service from the whole repo. Open the service **Settings** and set **Root Directory** to **`worker`** (so the build uses `worker/Dockerfile`).  
-4. **Variables** tab → add every row from **C0** above.  
-5. **Settings → Networking / Generate domain** (or equivalent) so the service gets a public **`https://…up.railway.app`** URL.  
-6. Trigger a **deploy** and watch **Deploy Logs** until the container stays healthy.  
-7. Copy the public URL → optionally set **`WORKER_BASE_URL`** on Vercel to that URL (see Part B).
-
-[Railway docs — Deploying a Dockerfile](https://docs.railway.com/guides/dockerfiles)
+In Render → **Logs**: you should see the consumer starting and a line like `callback=https://your-project.vercel.app`. If you see Redis/S3/401 errors, re-check the variables above.
 
 ---
 
-## C2 — Render (no Fly CLI required)
+## Step 4 — Smoke test
 
-1. Sign up at [render.com](https://render.com).  
-2. **New +** → **Web Service** → connect this GitHub repository.  
-3. **Root Directory:** `worker`  
-4. **Runtime:** **Docker** (Render should detect `Dockerfile`).  
-5. **Instance type:** choose a plan that stays **awake** if you can — a sleeping free web service may **not** process the queue reliably.  
-6. **Environment** → add all variables from **C0**.  
-7. **Health check path:** `/health` (optional but recommended).  
-8. **Create Web Service**, wait for deploy, then copy the **`https://…onrender.com`** URL → optional **`WORKER_BASE_URL`** on Vercel.
-
-[Render docs — Docker deploy](https://render.com/docs/docker)
+1. Open your **Vercel URL** → register or log in.
+2. Upload a **small** PDF or image (under ~4 MB on Vercel) → **Convert**.
+3. If the job stays **Queued** forever: worker asleep (wait or upgrade), wrong **`REDIS_URL`**, or worker not running — check **Render Logs**.
+4. If the job **fails** with auth: **`WORKER_CALLBACK_TOKEN`** mismatch or wrong **`FRONTEND_BASE_URL`**.
+5. **Forgot password** → confirm email link uses your real domain (depends on **`APP_URL`** + Resend).
 
 ---
 
-## C3 — Fly.io (CLI)
+## Quick troubleshooting
 
-Use this if you are fine with Fly’s signup/billing flow.
-
-### C3a. Install CLI and log in
-
-```powershell
-cd C:\path\to\fayda-id-printer\worker
-fly auth login
-```
-
-### C3b. First-time app creation
-
-```powershell
-fly launch
-```
-
-- You can change **`app = "..."`** in `fly.toml` if the name is taken.  
-- Say **no** to adding Postgres/Redis on Fly (you use Neon + Upstash).  
-- You can deploy after secrets are set.
-
-### C3c. Set secrets (PowerShell line continuation uses `` ` `` or put one variable per line)
-
-Use your **real** Vercel URL and the same values as **C0**.
-
-**Example — Cloudflare R2**
-
-```powershell
-fly secrets set `
-  REDIS_URL="rediss://YOUR_UPSTASH_URL" `
-  FRONTEND_BASE_URL="https://YOUR-PROJECT.vercel.app" `
-  WORKER_CALLBACK_TOKEN="PASTE_EXACT_SAME_AS_VERCEL" `
-  S3_ENDPOINT="https://YOUR_ACCOUNT_ID.r2.cloudflarestorage.com" `
-  S3_REGION="auto" `
-  S3_ACCESS_KEY="..." `
-  S3_SECRET_KEY="..." `
-  S3_BUCKET_INPUT="fayda-input" `
-  S3_BUCKET_OUTPUT="fayda-output" `
-  S3_FORCE_PATH_STYLE="false"
-```
-
-**Example — Supabase Storage**
-
-```powershell
-fly secrets set `
-  REDIS_URL="rediss://YOUR_UPSTASH_URL" `
-  FRONTEND_BASE_URL="https://YOUR-PROJECT.vercel.app" `
-  WORKER_CALLBACK_TOKEN="PASTE_EXACT_SAME_AS_VERCEL" `
-  S3_ENDPOINT="https://YOUR_PROJECT_REF.storage.supabase.co/storage/v1/s3" `
-  S3_REGION="us-east-1" `
-  S3_ACCESS_KEY="..." `
-  S3_SECRET_KEY="..." `
-  S3_BUCKET_INPUT="fayda-input" `
-  S3_BUCKET_OUTPUT="fayda-output" `
-  S3_FORCE_PATH_STYLE="true"
-```
-
-*(On **cmd.exe** you can use `^` at the end of each line instead of `` ` ``.)*
-
-### C3d. Deploy and logs
-
-```powershell
-fly deploy
-fly logs
-```
-
-You want to see the worker running and callbacks targeting your Vercel URL. Fly assigns **`https://<app>.fly.dev`** — you can set **`WORKER_BASE_URL`** on Vercel to that URL if you use the health route.
+| Problem | Fix |
+|---------|-----|
+| “Something went wrong” / upload fails | File too large for Vercel (~4 MB safe). Use a smaller file. |
+| Convert stuck on **Queued** | Render sleeping, or **`REDIS_URL`** wrong on worker, or worker crashed — **Logs**. |
+| Job fails / 401 in logs | **`WORKER_CALLBACK_TOKEN`** must match; **`FRONTEND_BASE_URL`** must match Vercel exactly. |
+| Upload works, worker errors on S3 | **`S3_*`** identical on Vercel and Render; buckets exist; **`S3_FORCE_PATH_STYLE`** correct for R2 vs Supabase. |
 
 ---
 
-## C4 — After the worker is live
+## Copy-paste template
 
-1. Confirm **`GET https://<worker-host>/health`** returns OK.  
-2. On Vercel, confirm **`WORKER_CALLBACK_TOKEN`**, **`REDIS_URL`**, and all **`S3_*`** match the worker.  
-3. Optional: set **`WORKER_BASE_URL`** on Vercel to the worker’s public URL.  
-4. Redeploy Vercel if you changed variables.  
-5. Run **Part D** tests.
+See **`deployment/production-env.template.txt`** for a single list of variable names.
 
 ---
 
-# Part D — Test everything (same as local)
+## Local development
 
-1. Open your **live site** (your Vercel production URL or custom domain).  
-2. **Register** a test user → if approval is on, they stay **pending** until an admin approves them.  
-3. **Register / log in** with an email that is in **`ADMIN_EMAILS_FROM_CONFIG`** in `frontend/src/lib/admin-config.ts` **or** listed in **`ADMIN_EMAIL` / `ADMIN_EMAILS`** on Vercel → open **`/admin`** → **Approve** the test user if they are still pending.  
-4. Log in as the test user → upload a PDF → **Convert** → wait for preview/download.  
-5. **Forgot password** on the test user → check email → open link → set new password → log in.
-
----
-
-## If something fails
-
-| Symptom | What to check |
-|---------|----------------|
-| “Something went wrong” right after **Convert** (worked locally) | **Vercel** limits each upload to about **4.5 MB** for serverless routes ([Vercel limits](https://vercel.com/docs/functions/limitations)). Large Fayda PDFs work on your PC but fail in production — try a **smaller PDF**, a **screenshot under ~4 MB**, or host uploads differently later. The app now warns when the file is too large for Vercel. |
-| Convert never finishes | Worker **deployed** and **not sleeping**? **Logs** on Railway / Render / Fly. Same **`REDIS_URL`** on Vercel and worker? Same **`WORKER_CALLBACK_TOKEN`**? **`FRONTEND_BASE_URL`** = exact Vercel URL (https, no trailing slash)? |
-| Upload error | All **`S3_*`** on Vercel correct? Buckets exist? |
-| Worker cannot read file | **`S3_*`** keys, endpoint, **`S3_FORCE_PATH_STYLE`**, and bucket names **identical** on Vercel and worker |
-| Reset email wrong link | **`APP_URL`** on Vercel = real site URL, then redeploy |
-| 401 on job complete | **`WORKER_CALLBACK_TOKEN`** mismatch between Vercel and worker |
-| Cannot open `/admin` | Your login email must be in **`ADMIN_EMAILS_FROM_CONFIG`** and/or **`ADMIN_EMAIL` / `ADMIN_EMAILS`** on Vercel |
-
----
-
-## Quick reference table
-
-| Service | Role |
-|---------|------|
-| Vercel | Next.js website |
-| Neon | Postgres database |
-| Upstash | Redis queue |
-| R2 or Supabase Storage | File storage (S3 API) |
-| Railway, Render, or Fly.io | Python worker (Docker) |
-| Resend | Emails |
-
-All variable names in one place: **`deployment/production-env.template.txt`**.
-
----
-
-## Local development (reminder)
-
-From the repo: `docker compose up -d`, then `frontend/.env.local` + `worker/.env` as in the `.env.example` files. You do **not** need Vercel or a cloud worker for daily coding on your machine.
+You do **not** need Vercel or Render on your machine for daily work. Use Docker Compose and `frontend/.env.local` + `worker/.env` per the project’s `.env.example` files.

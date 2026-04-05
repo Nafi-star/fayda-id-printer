@@ -1,4 +1,4 @@
-# Copy values into Vercel (frontend) and the worker host (Railway / Render / Fly).
+# Copy values into Vercel (frontend) and Render (worker). See DEPLOY.md.
 # Generate a random WORKER_CALLBACK_TOKEN (32+ chars) — same on both.
 
 WORKER_CALLBACK_TOKEN=

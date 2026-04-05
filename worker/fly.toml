@@ -1,5 +1,4 @@
-# Deploy from the worker/ folder:  fly auth login && fly launch
-# Set secrets: fly secrets set REDIS_URL=... FRONTEND_BASE_URL=... (see DEPLOY.md)
+# Optional: Fly.io deploy. Primary guide: Render — see repo DEPLOY.md
 
 app = "fayda-printer-worker"
 primary_region = "iad"
