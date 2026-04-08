@@ -385,7 +385,9 @@ def process_conversion_job(job: ConversionJob) -> ConversionResult:
     """
     start_t = time.perf_counter()
     input_key = job.input_file_key
-    output_key = f"{job.output_prefix}/{job.job_id}.png"
+    output_format = job.output_format if job.output_format in ("png", "pdf") else "png"
+    output_ext = "pdf" if output_format == "pdf" else "png"
+    output_key = f"{job.output_prefix}/{job.job_id}.{output_ext}"
     color_mode: ColorMode = job.color_mode if job.color_mode in ("color", "bw") else "color"
 
     use_s3 = _s3_enabled()
@@ -470,15 +472,19 @@ def process_conversion_job(job: ConversionJob) -> ConversionResult:
             card = _fit_to_card(im, color_mode)
         t_fit1 = time.perf_counter()
 
-    # compress_level 3 is fast; avoid optimize=True (extra passes) for quicker saves.
+    # Encode output. PNG is default for sharp cards; PDF is optional for easier sharing.
     t_encode0 = time.perf_counter()
     out_buf = io.BytesIO()
-    # Faster PNG save. File size is not a problem for printing.
-    card.save(out_buf, format="PNG", compress_level=1)
+    if output_format == "pdf":
+        # Pillow expects RGB for PDF save; keep quality high enough for print/export.
+        card.convert("RGB").save(out_buf, format="PDF", resolution=300.0)
+    else:
+        # Faster PNG save. File size is not a problem for printing.
+        card.save(out_buf, format="PNG", compress_level=1)
     out_buf.seek(0)
     t_encode1 = time.perf_counter()
 
-    png_bytes = out_buf.getvalue()
+    output_bytes = out_buf.getvalue()
 
     t_upload0 = time.perf_counter()
     uploaded_s3 = False
@@ -487,14 +493,14 @@ def process_conversion_job(job: ConversionJob) -> ConversionResult:
             s3.put_object(
                 Bucket=settings.s3_bucket_output,
                 Key=output_key,
-                Body=png_bytes,
-                ContentType="image/png",
+                Body=output_bytes,
+                ContentType="application/pdf" if output_format == "pdf" else "image/png",
             )
             uploaded_s3 = True
         except Exception:
             logger.exception("S3 output upload failed; using local storage. key=%s", output_key)
     if not uploaded_s3:
-        _write_local_png(output_key, png_bytes)
+        _write_local_png(output_key, output_bytes)
     t_upload1 = time.perf_counter()
 
     extra = ""

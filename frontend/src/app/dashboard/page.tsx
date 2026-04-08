@@ -18,16 +18,18 @@ type UsageInfo = {
 };
 
 type UploadConfig = { directUpload: boolean; maxMultipartBytes: number };
+type OutputFormat = "png" | "pdf";
 
 export default function DashboardPage() {
   const router = useRouter();
   const { t, locale } = useI18n();
   const [user, setUser] = useState<User | null>(null);
   const [jobs, setJobs] = useState<Job[]>([]);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [fileName, setFileName] = useState("No file selected");
   const [mode, setMode] = useState<"pdf" | "image">("pdf");
   const [colorMode, setColorMode] = useState<"color" | "bw">("color");
+  const [outputFormat, setOutputFormat] = useState<OutputFormat>("png");
   const [loading, setLoading] = useState(true);
   /** false on server and first client paint — avoids Convert button disabled mismatch with Next SSR. */
   const [mounted, setMounted] = useState(false);
@@ -195,105 +197,136 @@ export default function DashboardPage() {
     };
   }, [pendingJobId, refresh, t]);
 
-  function applyFile(file: File | null) {
-    setSelectedFile(file);
-    setFileName(file?.name ?? "No file selected");
+  function applyFiles(files: File[]) {
+    if (mode === "pdf") {
+      const one = files[0] ? [files[0]] : [];
+      setSelectedFiles(one);
+      setFileName(one[0]?.name ?? "No file selected");
+    } else {
+      const picked = files.slice(0, 5);
+      setSelectedFiles(picked);
+      if (picked.length === 0) {
+        setFileName("No file selected");
+      } else if (picked.length === 1) {
+        setFileName(picked[0].name);
+      } else {
+        setFileName(`${picked.length} image files selected`);
+      }
+    }
     setError(null);
   }
 
   function onDrop(e: React.DragEvent) {
     e.preventDefault();
-    const file = e.dataTransfer.files?.[0];
-    if (file) applyFile(file);
+    const files = Array.from(e.dataTransfer.files ?? []);
+    if (files.length > 0) applyFiles(files);
+  }
+
+  async function uploadOneFile(file: File): Promise<string> {
+    if (uploadConfig?.directUpload) {
+      const presRes = await fetch("/api/uploads/presign", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fileName: file.name,
+          contentType: file.type || "application/octet-stream",
+          fileSize: file.size,
+        }),
+      });
+      const presData = (await presRes.json()) as {
+        uploadUrl?: string;
+        inputFileKey?: string;
+        contentType?: string;
+        message?: string;
+      };
+      if (!presRes.ok || !presData.uploadUrl || !presData.inputFileKey) {
+        throw new Error(presData.message ?? "Could not start direct upload.");
+      }
+      const putRes = await fetch(presData.uploadUrl, {
+        method: "PUT",
+        body: file,
+        headers: { "Content-Type": presData.contentType ?? "application/octet-stream" },
+      });
+      if (!putRes.ok) throw new Error(t("dashboard.errDirectUploadCors"));
+      return presData.inputFileKey;
+    }
+
+    const formData = new FormData();
+    formData.append("file", file);
+    const uploadRes = await fetch("/api/uploads", {
+      method: "POST",
+      credentials: "include",
+      body: formData,
+    });
+    const uploadData = (await uploadRes.json()) as { inputFileKey?: string; message?: string };
+    if (!uploadRes.ok || !uploadData.inputFileKey) {
+      throw new Error(uploadData.message ?? "Upload failed.");
+    }
+    return uploadData.inputFileKey;
   }
 
   async function runConversion() {
     setError(null);
     setQueueStuckHint(false);
-    if (!selectedFile) {
+    if (selectedFiles.length === 0) {
       setError(mode === "pdf" ? t("dashboard.errNeedPdf") : t("dashboard.errNeedImage"));
+      return;
+    }
+    if (mode === "image" && selectedFiles.length > 5) {
+      setError("You can upload up to 5 screenshots at once.");
+      return;
+    }
+    if (mode === "pdf" && selectedFiles.length > 1) {
+      setError("Please select only one PDF.");
       return;
     }
 
     const maxMultipart = uploadConfig?.maxMultipartBytes ?? 25 * 1024 * 1024;
-    if (!uploadConfig?.directUpload && selectedFile.size > maxMultipart) {
-      setError(t("dashboard.errVercelUploadLimit"));
-      return;
+    if (!uploadConfig?.directUpload) {
+      for (const f of selectedFiles) {
+        if (f.size > maxMultipart) {
+          setError(t("dashboard.errVercelUploadLimit"));
+          return;
+        }
+      }
     }
 
     setConverting(true);
     setPreviewJob(null);
     try {
-      let inputFileKey: string;
-
-      if (uploadConfig?.directUpload) {
-        const presRes = await fetch("/api/uploads/presign", {
+      const jobIds: string[] = [];
+      for (const file of selectedFiles) {
+        const inputFileKey = await uploadOneFile(file);
+        const jobRes = await fetch("/api/jobs", {
           method: "POST",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            fileName: selectedFile.name,
-            contentType: selectedFile.type || "application/octet-stream",
-            fileSize: selectedFile.size,
+            inputFileKey,
+            colorMode,
+            outputFormat,
           }),
         });
-        const presData = (await presRes.json()) as {
-          uploadUrl?: string;
-          inputFileKey?: string;
-          contentType?: string;
-          message?: string;
-        };
-        if (!presRes.ok || !presData.uploadUrl || !presData.inputFileKey) {
-          setError(presData.message ?? t("dashboard.errDirectUploadFailed"));
+        const jobData = (await jobRes.json()) as { jobId?: string; message?: string };
+        if (!jobRes.ok || !jobData.jobId) {
+          setError(jobData.message ?? t("dashboard.errStart"));
           setConverting(false);
           return;
         }
-        const putRes = await fetch(presData.uploadUrl, {
-          method: "PUT",
-          body: selectedFile,
-          headers: { "Content-Type": presData.contentType ?? "application/octet-stream" },
-        });
-        if (!putRes.ok) {
-          setError(t("dashboard.errDirectUploadCors"));
-          setConverting(false);
-          return;
-        }
-        inputFileKey = presData.inputFileKey;
-      } else {
-        const formData = new FormData();
-        formData.append("file", selectedFile);
-        const uploadRes = await fetch("/api/uploads", {
-          method: "POST",
-          credentials: "include",
-          body: formData,
-        });
-        const uploadData = (await uploadRes.json()) as { inputFileKey?: string; message?: string };
-        if (!uploadRes.ok || !uploadData.inputFileKey) {
-          setError(uploadData.message ?? "Upload failed.");
-          setConverting(false);
-          return;
-        }
-        inputFileKey = uploadData.inputFileKey;
+        jobIds.push(jobData.jobId);
       }
 
-      const jobRes = await fetch("/api/jobs", {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          inputFileKey,
-          colorMode,
-        }),
-      });
-      const jobData = (await jobRes.json()) as { jobId?: string; message?: string };
-      if (!jobRes.ok || !jobData.jobId) {
-        setError(jobData.message ?? t("dashboard.errStart"));
+      if (jobIds.length === 1) {
+        setPendingJobId(jobIds[0]);
+      } else {
+        setPendingJobId(null);
         setConverting(false);
-        return;
+        await refresh({ clearError: false });
       }
-      setPendingJobId(jobData.jobId);
-    } catch {
-      setError(t("dashboard.errGeneric"));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : t("dashboard.errGeneric");
+      setError(msg || t("dashboard.errGeneric"));
       setConverting(false);
     }
   }
@@ -329,7 +362,7 @@ export default function DashboardPage() {
           type="button"
           onClick={() => {
             setMode("pdf");
-            applyFile(null);
+            applyFiles([]);
           }}
           className={`flex flex-1 items-center justify-center gap-1.5 rounded-full px-3 py-2 text-xs font-semibold transition sm:gap-2 sm:px-5 sm:text-sm ${
             mode === "pdf" ? "bg-[#334155] text-white shadow-md" : "text-zinc-400 hover:text-white"
@@ -342,7 +375,7 @@ export default function DashboardPage() {
           type="button"
           onClick={() => {
             setMode("image");
-            applyFile(null);
+            applyFiles([]);
           }}
           className={`flex flex-1 items-center justify-center gap-1.5 rounded-full px-3 py-2 text-xs font-semibold transition sm:gap-2 sm:px-5 sm:text-sm ${
             mode === "image" ? "bg-[#334155] text-white shadow-md" : "text-zinc-400 hover:text-white"
@@ -372,12 +405,13 @@ export default function DashboardPage() {
               <input
                 type="file"
                 accept={acceptAttr}
+                multiple={mode === "image"}
                 className="hidden"
-                onChange={(e) => applyFile(e.target.files?.[0] ?? null)}
+                onChange={(e) => applyFiles(Array.from(e.target.files ?? []))}
               />
             </label>
             <p className="mt-3 text-xs text-zinc-500 sm:text-sm">
-              {selectedFile ? fileName : t("dashboard.noFile")}
+              {selectedFiles.length > 0 ? fileName : t("dashboard.noFile")}
             </p>
           </div>
 
@@ -406,6 +440,34 @@ export default function DashboardPage() {
               }`}
             >
               {t("dashboard.bw")}
+            </button>
+          </div>
+
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <span className="w-full text-[10px] font-bold uppercase tracking-wider text-zinc-500 sm:w-auto sm:mr-2">
+              Output
+            </span>
+            <button
+              type="button"
+              onClick={() => setOutputFormat("png")}
+              className={`rounded-full border px-4 py-1.5 text-xs font-semibold transition sm:px-5 sm:py-2 sm:text-sm ${
+                outputFormat === "png"
+                  ? "border-[#facc15] bg-[#1e293b] text-[#facc15]"
+                  : "border-white/35 text-zinc-200 hover:border-white/55"
+              }`}
+            >
+              PNG
+            </button>
+            <button
+              type="button"
+              onClick={() => setOutputFormat("pdf")}
+              className={`rounded-full border px-4 py-1.5 text-xs font-semibold transition sm:px-5 sm:py-2 sm:text-sm ${
+                outputFormat === "pdf"
+                  ? "border-[#facc15] bg-[#1e293b] text-[#facc15]"
+                  : "border-white/35 text-zinc-200 hover:border-white/55"
+              }`}
+            >
+              PDF
             </button>
           </div>
 
@@ -453,14 +515,20 @@ export default function DashboardPage() {
             <div className="mt-8 rounded-2xl border border-white/10 bg-[#0b1222] p-4 sm:mt-10 sm:p-5">
               <h3 className="text-base font-semibold text-white sm:text-lg">{t("dashboard.previewTitle")}</h3>
               <p className="mt-1 text-xs text-zinc-400 sm:text-sm">{t("dashboard.previewHint")}</p>
-              <div className="mt-4 flex justify-center rounded-xl bg-zinc-900/80 p-3 sm:p-4">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={`/api/jobs/${previewJob.id}/download?inline=1&t=${previewBust}`}
-                  alt=""
-                  className="max-h-[360px] w-auto max-w-full rounded-lg border border-white/10 object-contain shadow-xl sm:max-h-[420px]"
-                />
-              </div>
+              {previewJob.output_file_key?.toLowerCase().endsWith(".pdf") ? (
+                <p className="mt-4 rounded-xl bg-zinc-900/80 p-4 text-sm text-zinc-300">
+                  PDF output ready. Use the download button below.
+                </p>
+              ) : (
+                <div className="mt-4 flex justify-center rounded-xl bg-zinc-900/80 p-3 sm:p-4">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={`/api/jobs/${previewJob.id}/download?inline=1&t=${previewBust}`}
+                    alt=""
+                    className="max-h-[360px] w-auto max-w-full rounded-lg border border-white/10 object-contain shadow-xl sm:max-h-[420px]"
+                  />
+                </div>
+              )}
               <div className="mt-4 flex flex-wrap gap-3">
                 <a
                   href={`/api/jobs/${previewJob.id}/download`}

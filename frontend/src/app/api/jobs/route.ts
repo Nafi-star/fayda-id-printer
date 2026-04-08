@@ -14,6 +14,7 @@ export const dynamic = "force-dynamic";
 type CreateJobBody = {
   inputFileKey: string;
   colorMode?: "color" | "bw";
+  outputFormat?: "png" | "pdf";
 };
 
 export async function GET(req: NextRequest) {
@@ -76,6 +77,7 @@ export async function POST(req: NextRequest) {
   );
 
   const colorMode: "color" | "bw" = body.colorMode === "bw" ? "bw" : "color";
+  const outputFormat: "png" | "pdf" = body.outputFormat === "pdf" ? "pdf" : "png";
   const outputPrefix = `users/${user.id}/outputs`;
 
   const workerHttp =
@@ -87,6 +89,7 @@ export async function POST(req: NextRequest) {
     input_file_key: body.inputFileKey,
     output_prefix: outputPrefix,
     color_mode: colorMode,
+    output_format: outputFormat,
   };
 
   if (workerHttp) {

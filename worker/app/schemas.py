@@ -9,6 +9,7 @@ class ConversionJob(BaseModel):
     input_file_key: str
     output_prefix: str
     color_mode: Literal["color", "bw"] = Field(default="color")
+    output_format: Literal["png", "pdf"] = Field(default="png")
 
 
 class ConversionResult(BaseModel):
