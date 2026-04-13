@@ -203,15 +203,24 @@ export default function DashboardPage() {
       setSelectedFiles(one);
       setFileName(one[0]?.name ?? "No file selected");
     } else {
-      const picked = files.slice(0, 5);
-      setSelectedFiles(picked);
-      if (picked.length === 0) {
-        setFileName("No file selected");
-      } else if (picked.length === 1) {
-        setFileName(picked[0].name);
-      } else {
-        setFileName(`${picked.length} image files selected`);
-      }
+      // Screenshot mode: keep previously selected files, add new ones, max 5.
+      const incoming = files.filter(Boolean);
+      setSelectedFiles((prev) => {
+        const merged = [...prev, ...incoming];
+        const seen = new Set<string>();
+        const deduped: File[] = [];
+        for (const f of merged) {
+          const key = `${f.name}|${f.size}|${f.lastModified}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          deduped.push(f);
+          if (deduped.length >= 5) break;
+        }
+        if (deduped.length === 0) setFileName("No file selected");
+        else if (deduped.length === 1) setFileName(deduped[0].name);
+        else setFileName(`${deduped.length} image files selected`);
+        return deduped;
+      });
     }
     setError(null);
   }
