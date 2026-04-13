@@ -136,6 +136,26 @@ def _stitch_images_vertically(images: list[Image.Image]) -> Image.Image:
     return out
 
 
+def _looks_like_qr_page(im: Image.Image) -> bool:
+    """
+    Heuristic: Fayda back-page screenshots often contain a large high-contrast QR block.
+    We approximate this by measuring the ratio of dark pixels after downscaling.
+    """
+    try:
+        g = im.convert("L")
+        # Keep it small/fast.
+        g.thumbnail((320, 320))
+        px = list(g.getdata())
+        if not px:
+            return False
+        dark = sum(1 for p in px if p < 80)
+        ratio = dark / float(len(px))
+        # QR-heavy pages tend to be much darker overall than the front portrait page.
+        return ratio > 0.18
+    except Exception:
+        return False
+
+
 def _s3_enabled() -> bool:
     ep = settings.s3_endpoint
     return bool(ep and str(ep).strip())
@@ -527,8 +547,34 @@ def process_conversion_job(job: ConversionJob) -> ConversionResult:
                     b = lp.read_bytes()
             images.append(Image.open(io.BytesIO(b)))
         try:
-            stitched = _stitch_images_vertically(images)
-            card = _fit_to_card(stitched, color_mode)
+            # If user provided multiple screenshots, attempt to organize into front/back.
+            if len(images) >= 2:
+                front_imgs: list[Image.Image] = []
+                back_imgs: list[Image.Image] = []
+                for im in images:
+                    (back_imgs if _looks_like_qr_page(im) else front_imgs).append(im)
+                # Fallback split if heuristic didn't detect anything.
+                if not front_imgs or not back_imgs:
+                    mid = max(1, len(images) // 2)
+                    front_imgs = images[:mid]
+                    back_imgs = images[mid:]
+                front_stitched = _stitch_images_vertically(front_imgs)
+                back_stitched = _stitch_images_vertically(back_imgs) if back_imgs else None
+                front_card = _fit_to_card(front_stitched, color_mode)
+                back_card = _fit_to_card(back_stitched, color_mode) if back_stitched else None
+                # For PNG output we return a single combined image; for PDF we output two pages.
+                card = front_card if back_card is None else Image.new("RGB", (CARD_W, CARD_H * 2), (255, 255, 255))
+                if back_card is not None:
+                    card.paste(front_card, (0, 0))
+                    card.paste(back_card, (0, CARD_H))
+                    # Store back_card for PDF creation below via attribute on local scope.
+                    _back_card_for_pdf = back_card
+                else:
+                    _back_card_for_pdf = None
+            else:
+                stitched = _stitch_images_vertically(images)
+                card = _fit_to_card(stitched, color_mode)
+                _back_card_for_pdf = None
         finally:
             for im in images:
                 try:
@@ -541,8 +587,19 @@ def process_conversion_job(job: ConversionJob) -> ConversionResult:
     t_encode0 = time.perf_counter()
     out_buf = io.BytesIO()
     if output_format == "pdf":
-        # Pillow expects RGB for PDF save; keep quality high enough for print/export.
-        card.convert("RGB").save(out_buf, format="PDF", resolution=300.0)
+        # Pillow can write a multi-page PDF using save_all + append_images.
+        # If we have a back page, output it as page 2.
+        back = locals().get("_back_card_for_pdf")
+        if isinstance(back, Image.Image):
+            card.convert("RGB").save(
+                out_buf,
+                format="PDF",
+                resolution=300.0,
+                save_all=True,
+                append_images=[back.convert("RGB")],
+            )
+        else:
+            card.convert("RGB").save(out_buf, format="PDF", resolution=300.0)
     else:
         # Faster PNG save. File size is not a problem for printing.
         card.save(out_buf, format="PNG", compress_level=1)
