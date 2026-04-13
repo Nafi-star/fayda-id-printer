@@ -17,7 +17,7 @@ export async function GET(req: NextRequest, { params }: Params) {
 
   const result = await db.query(
     `
-    SELECT id, user_id, input_file_key, output_file_key, status, error_message, created_at, updated_at
+    SELECT id, user_id, input_file_key, input_file_keys, output_file_key, status, error_message, created_at, updated_at
     FROM jobs
     WHERE id = $1 AND user_id = $2
     `,

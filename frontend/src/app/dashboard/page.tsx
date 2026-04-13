@@ -295,35 +295,28 @@ export default function DashboardPage() {
     setConverting(true);
     setPreviewJob(null);
     try {
-      const jobIds: string[] = [];
+      const inputKeys: string[] = [];
       for (const file of selectedFiles) {
-        const inputFileKey = await uploadOneFile(file);
-        const jobRes = await fetch("/api/jobs", {
-          method: "POST",
-          credentials: "include",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            inputFileKey,
-            colorMode,
-            outputFormat,
-          }),
-        });
-        const jobData = (await jobRes.json()) as { jobId?: string; message?: string };
-        if (!jobRes.ok || !jobData.jobId) {
-          setError(jobData.message ?? t("dashboard.errStart"));
-          setConverting(false);
-          return;
-        }
-        jobIds.push(jobData.jobId);
+        inputKeys.push(await uploadOneFile(file));
       }
 
-      if (jobIds.length === 1) {
-        setPendingJobId(jobIds[0]);
-      } else {
-        setPendingJobId(null);
+      const jobRes = await fetch("/api/jobs", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          mode === "image"
+            ? { inputFileKeys: inputKeys, colorMode, outputFormat }
+            : { inputFileKey: inputKeys[0], colorMode, outputFormat },
+        ),
+      });
+      const jobData = (await jobRes.json()) as { jobId?: string; message?: string };
+      if (!jobRes.ok || !jobData.jobId) {
+        setError(jobData.message ?? t("dashboard.errStart"));
         setConverting(false);
-        await refresh({ clearError: false });
+        return;
       }
+      setPendingJobId(jobData.jobId);
     } catch (err) {
       const msg = err instanceof Error ? err.message : t("dashboard.errGeneric");
       setError(msg || t("dashboard.errGeneric"));

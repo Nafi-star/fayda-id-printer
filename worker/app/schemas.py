@@ -7,6 +7,7 @@ class ConversionJob(BaseModel):
     job_id: str
     user_id: str
     input_file_key: str
+    input_file_keys: list[str] | None = None
     output_prefix: str
     color_mode: Literal["color", "bw"] = Field(default="color")
     output_format: Literal["png", "pdf"] = Field(default="png")

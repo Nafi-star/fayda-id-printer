@@ -6,6 +6,7 @@ import { useI18n } from "@/i18n/context";
 export type JobCardModel = {
   id: string;
   input_file_key: string;
+  input_file_keys?: string | null;
   status: string;
   created_at: string;
   output_file_key?: string | null;
@@ -76,7 +77,16 @@ function statusLabel(status: string, t: (k: string) => string) {
 
 export function JobCard({ job, variant = "default" }: { job: JobCardModel; variant?: "default" | "compact" }) {
   const { t, locale } = useI18n();
-  const name = friendlyFileName(job.input_file_key);
+  let multiCount: number | null = null;
+  if (job.input_file_keys) {
+    try {
+      const arr = JSON.parse(job.input_file_keys) as unknown;
+      if (Array.isArray(arr)) multiCount = arr.length;
+    } catch {
+      multiCount = null;
+    }
+  }
+  const name = multiCount && multiCount > 1 ? `${multiCount} screenshots` : friendlyFileName(job.input_file_key);
   const kind = fileKindFromName(name);
   const shortId = job.id.slice(0, 8);
 

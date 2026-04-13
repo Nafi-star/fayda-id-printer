@@ -12,7 +12,8 @@ export const maxDuration = 300;
 export const dynamic = "force-dynamic";
 
 type CreateJobBody = {
-  inputFileKey: string;
+  inputFileKey?: string;
+  inputFileKeys?: string[];
   colorMode?: "color" | "bw";
   outputFormat?: "png" | "pdf";
 };
@@ -25,7 +26,7 @@ export async function GET(req: NextRequest) {
   await ensureSchema();
   const result = await db.query(
     `
-    SELECT id, user_id, input_file_key, output_file_key, status, error_message, created_at, updated_at
+    SELECT id, user_id, input_file_key, input_file_keys, output_file_key, status, error_message, created_at, updated_at
     FROM jobs
     WHERE user_id = $1
       AND COALESCE(input_file_key, '') <> '[purged]'
@@ -40,9 +41,15 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const body = (await req.json()) as Partial<CreateJobBody>;
-  if (!body.inputFileKey) {
+  const keys =
+    Array.isArray(body.inputFileKeys) && body.inputFileKeys.length > 0
+      ? body.inputFileKeys.filter((k) => typeof k === "string" && k.trim().length > 0).slice(0, 5)
+      : body.inputFileKey
+        ? [body.inputFileKey]
+        : [];
+  if (keys.length === 0) {
     return NextResponse.json(
-      { message: "inputFileKey is required." },
+      { message: "inputFileKey (or inputFileKeys) is required." },
       { status: 400 },
     );
   }
@@ -68,12 +75,14 @@ export async function POST(req: NextRequest) {
   }
 
   const jobId = randomUUID();
+  const firstKey = keys[0]!;
+  const inputKeysJson = keys.length > 1 ? JSON.stringify(keys) : null;
   await db.query(
     `
-    INSERT INTO jobs (id, user_id, input_file_key, status)
-    VALUES ($1, $2, $3, 'queued')
+    INSERT INTO jobs (id, user_id, input_file_key, input_file_keys, status)
+    VALUES ($1, $2, $3, $4, 'queued')
     `,
-    [jobId, user.id, body.inputFileKey],
+    [jobId, user.id, firstKey, inputKeysJson],
   );
 
   const colorMode: "color" | "bw" = body.colorMode === "bw" ? "bw" : "color";
@@ -86,7 +95,8 @@ export async function POST(req: NextRequest) {
   const queuePayload = {
     job_id: jobId,
     user_id: user.id,
-    input_file_key: body.inputFileKey,
+    input_file_key: firstKey,
+    input_file_keys: keys.length > 1 ? keys : undefined,
     output_prefix: outputPrefix,
     color_mode: colorMode,
     output_format: outputFormat,

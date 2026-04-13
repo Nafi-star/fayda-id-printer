@@ -91,6 +91,51 @@ def _write_local_png(output_key: str, png_bytes: bytes) -> None:
     out_path.write_bytes(png_bytes)
 
 
+def _stitch_images_vertically(images: list[Image.Image]) -> Image.Image:
+    """
+    Combine multiple screenshots into one tall image (top-to-bottom) before fitting to card.
+    This helps when a user scrolls and captures the ID in multiple parts.
+    """
+    if not images:
+        return Image.new("RGB", (CARD_W, CARD_H), (255, 255, 255))
+
+    processed: list[Image.Image] = []
+    max_w = 1
+    for im in images:
+        rgb = im.convert("RGB")
+        # Light, fast margin cleanup before stitching.
+        if AUTO_CROP_ENABLED:
+            try:
+                rgb = _auto_crop_margins(rgb)
+            except Exception:
+                pass
+        processed.append(rgb)
+        max_w = max(max_w, rgb.size[0])
+
+    resized: list[Image.Image] = []
+    total_h = 0
+    for rgb in processed:
+        w, h = rgb.size
+        if w <= 0 or h <= 0:
+            continue
+        if w != max_w:
+            scale = max_w / float(w)
+            nh = max(1, int(round(h * scale)))
+            rgb = rgb.resize((max_w, nh), Image.Resampling.BILINEAR)
+        resized.append(rgb)
+        total_h += rgb.size[1]
+
+    if not resized:
+        return Image.new("RGB", (CARD_W, CARD_H), (255, 255, 255))
+
+    out = Image.new("RGB", (max_w, total_h), (255, 255, 255))
+    y = 0
+    for rgb in resized:
+        out.paste(rgb, (0, y))
+        y += rgb.size[1]
+    return out
+
+
 def _s3_enabled() -> bool:
     ep = settings.s3_endpoint
     return bool(ep and str(ep).strip())
@@ -384,7 +429,8 @@ def process_conversion_job(job: ConversionJob) -> ConversionResult:
     Render first PDF page or a screenshot to a high-resolution PNG (auto-cropped, aspect preserved).
     """
     start_t = time.perf_counter()
-    input_key = job.input_file_key
+    input_keys = job.input_file_keys if job.input_file_keys else [job.input_file_key]
+    input_key = input_keys[0]
     output_format = job.output_format if job.output_format in ("png", "pdf") else "png"
     output_ext = "pdf" if output_format == "pdf" else "png"
     output_key = f"{job.output_prefix}/{job.job_id}.{output_ext}"
@@ -468,8 +514,27 @@ def process_conversion_job(job: ConversionJob) -> ConversionResult:
         t_fit1 = time.perf_counter()
     else:
         t_pdf0 = time.perf_counter()
-        with Image.open(io.BytesIO(input_bytes)) as im:
-            card = _fit_to_card(im, color_mode)
+        images: list[Image.Image] = []
+        # First image already loaded as bytes; load all other screenshots too (if provided).
+        for idx, k in enumerate(input_keys):
+            b = input_bytes if idx == 0 else None
+            if b is None:
+                if use_s3 and s3 is not None:
+                    resp = s3.get_object(Bucket=settings.s3_bucket_input, Key=k)
+                    b = resp["Body"].read()
+                else:
+                    lp = _local_input_path(k)
+                    b = lp.read_bytes()
+            images.append(Image.open(io.BytesIO(b)))
+        try:
+            stitched = _stitch_images_vertically(images)
+            card = _fit_to_card(stitched, color_mode)
+        finally:
+            for im in images:
+                try:
+                    im.close()
+                except Exception:
+                    pass
         t_fit1 = time.perf_counter()
 
     # Encode output. PNG is default for sharp cards; PDF is optional for easier sharing.

@@ -39,6 +39,7 @@ export async function ensureSchema() {
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
       input_file_key TEXT NOT NULL,
+      input_file_keys TEXT,
       output_file_key TEXT,
       status TEXT NOT NULL,
       error_message TEXT,
@@ -46,6 +47,9 @@ export async function ensureSchema() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `);
+
+  // Backward-compatible: older DBs won't have the column.
+  await db.query(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS input_file_keys TEXT;`);
 
   await db.query(`
     CREATE INDEX IF NOT EXISTS idx_jobs_user_id_created_at
